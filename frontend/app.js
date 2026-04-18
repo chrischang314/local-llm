@@ -1,5 +1,11 @@
 const API = "";
 
+marked.setOptions({ breaks: true, gfm: true });
+
+function renderMarkdown(content) {
+  return DOMPurify.sanitize(marked.parse(content));
+}
+
 let currentUser = null;
 let currentConversationId = null;
 let messages = [];
@@ -186,7 +192,11 @@ function appendMessage(role, content = "") {
   wrapper.className = `message ${role}`;
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = content;
+  if (role === "assistant" && content) {
+    bubble.innerHTML = renderMarkdown(content);
+  } else {
+    bubble.textContent = content;
+  }
   wrapper.appendChild(bubble);
   messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -248,7 +258,7 @@ async function sendMessage() {
       const { done, value } = await reader.read();
       if (done) break;
       assistantContent += decoder.decode(value);
-      bubble.textContent = assistantContent;
+      bubble.innerHTML = renderMarkdown(assistantContent);
       bubble.appendChild(cursor);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
