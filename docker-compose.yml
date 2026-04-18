@@ -1,0 +1,57 @@
+services:
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ollama-init:
+    image: ollama/ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        ollama pull llama3.2:3b &&
+        ollama pull llama3.1:8b &&
+        ollama pull qwen2.5:14b &&
+        ollama pull gemma2:27b
+      "
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+
+  backend:
+    build: ./backend
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+    volumes:
+      - chat_data:/app/data
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  ollama_data:
+  chat_data:

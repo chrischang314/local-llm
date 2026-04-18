@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local LLM Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="login-screen">
+    <div class="login-card">
+      <h1>Local LLM Chat</h1>
+      <p>Enter your username to continue</p>
+      <form id="login-form">
+        <input id="username-input" type="text" placeholder="Username" autocomplete="username" required />
+        <button type="submit">Continue</button>
+      </form>
+      <p id="login-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <span id="sidebar-username"></span>
+        <button id="logout-btn" title="Log out">&#x21A9;</button>
+      </div>
+      <button id="new-chat-btn">+ New Chat</button>
+      <nav id="conversations-list"></nav>
+    </aside>
+
+    <div class="main">
+      <header>
+        <h1>Local LLM Chat</h1>
+        <select id="model-select">
+          <option value="">Loading models...</option>
+        </select>
+      </header>
+
+      <main id="messages"></main>
+
+      <footer>
+        <textarea id="input" placeholder="Ask something..." rows="1"></textarea>
+        <button id="send-btn">Send</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
