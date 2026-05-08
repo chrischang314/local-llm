@@ -257,10 +257,15 @@ async function sendMessage() {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      assistantContent += decoder.decode(value);
+      assistantContent += decoder.decode(value, { stream: true });
       bubble.innerHTML = renderMarkdown(assistantContent);
       bubble.appendChild(cursor);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    const tail = decoder.decode();
+    if (tail) {
+      assistantContent += tail;
+      bubble.innerHTML = renderMarkdown(assistantContent);
     }
   } catch (err) {
     bubble.textContent = `Error: ${err.message}`;
