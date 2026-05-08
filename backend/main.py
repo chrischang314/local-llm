@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+import asyncio
 import httpx
 import json
 import os
@@ -123,15 +124,36 @@ async def get_messages(conversation_id: int, user_id: int, db: AsyncSession = De
 @app.get("/models")
 async def list_models():
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{OLLAMA_URL}/api/tags")
             response.raise_for_status()
             return response.json()
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         raise HTTPException(status_code=503, detail="Cannot connect to Ollama. Is it running?")
 
 
 # --- Chat ---
+
+async def _persist_chat_result(full_response: str, is_new: bool, conversation_id: int, user_content: str):
+    async with AsyncSessionLocal() as db:
+        if full_response:
+            if is_new:
+                title = user_content[:50] + ("..." if len(user_content) > 50 else "")
+                conv = await db.get(Conversation, conversation_id)
+                if conv:
+                    conv.title = title
+            db.add(DBMessage(conversation_id=conversation_id, role="user", content=user_content))
+            db.add(DBMessage(conversation_id=conversation_id, role="assistant", content=full_response))
+            conv = await db.get(Conversation, conversation_id)
+            if conv:
+                conv.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+        elif is_new:
+            conv = await db.get(Conversation, conversation_id)
+            if conv:
+                await db.delete(conv)
+                await db.commit()
+
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
@@ -169,28 +191,26 @@ async def chat(request: ChatRequest):
                     },
                 ) as response:
                     async for line in response.aiter_lines():
-                        if line:
-                            data = json.loads(line)
-                            if content := data.get("message", {}).get("content"):
-                                full_response += content
-                                yield content
+                        if not line:
+                            continue
+                        data = json.loads(line)
+                        if err := data.get("error"):
+                            yield f"[Error: {err}]"
+                        elif content := data.get("message", {}).get("content"):
+                            full_response += content
+                            yield content
         except httpx.ConnectError:
             yield "[Error: Cannot connect to Ollama. Is it running?]"
+        except httpx.HTTPError as e:
+            yield f"[Error: {e}]"
         finally:
-            if full_response:
-                user_content = request.messages[-1].content
-                async with AsyncSessionLocal() as db:
-                    if is_new:
-                        title = user_content[:50] + ("..." if len(user_content) > 50 else "")
-                        conv = await db.get(Conversation, conversation_id)
-                        if conv:
-                            conv.title = title
-                    db.add(DBMessage(conversation_id=conversation_id, role="user", content=user_content))
-                    db.add(DBMessage(conversation_id=conversation_id, role="assistant", content=full_response))
-                    conv = await db.get(Conversation, conversation_id)
-                    if conv:
-                        conv.updated_at = datetime.now(timezone.utc)
-                    await db.commit()
+            user_content = request.messages[-1].content if request.messages else ""
+            try:
+                await asyncio.shield(_persist_chat_result(
+                    full_response, is_new, conversation_id, user_content,
+                ))
+            except asyncio.CancelledError:
+                pass
 
     return StreamingResponse(
         stream_and_save(),
