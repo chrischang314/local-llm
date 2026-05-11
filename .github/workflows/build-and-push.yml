@@ -1,0 +1,113 @@
+# Drop-in GitHub Actions workflow for app repos managed by container-orchestrator.
+#
+# Behavior:
+#   - On every push/PR to main: run tests.
+#   - On push to main (and tags v*): build images for each service in the
+#     matrix, push to ghcr.io/<owner>/<repo>/<service>.
+#   - Tags applied: branch name (e.g. `main`), short sha (`sha-abc1234`),
+#     semver if pushing a vX.Y.Z tag, plus `:latest` on default branch pushes.
+#   - Single-arch linux/arm64 today (Mac Mini cluster). To add amd64 nodes,
+#     change the `platforms:` line below to `linux/arm64,linux/amd64`.
+#
+# Customize:
+#   1. Update the `test` job to run your real test command.
+#   2. Edit the `services` matrix below to list each Dockerfile context in
+#      your repo. For a single-service repo, leave one entry with
+#      context: ".".
+#
+# Setup in the target repo (one-time):
+#   - Settings → Actions → General → Workflow permissions → "Read and write"
+#   - That's it. GHCR uses the built-in GITHUB_TOKEN; no PAT needed for push.
+
+name: build-and-push
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # CUSTOMIZE: replace this step with your real test command.
+      # Examples:
+      #   - run: pytest -q
+      #   - run: go test ./...
+      #   - run: npm ci && npm test
+      - name: Run tests
+        run: |
+          echo "TODO: replace with the repo's real test command."
+          exit 0
+
+  build:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # CUSTOMIZE: one entry per Dockerfile context.
+        service:
+          - name: backend
+            context: ./backend
+          - name: frontend
+            context: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross-arch builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name
+        id: image
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          repo_lc="${GITHUB_REPOSITORY##*/}"
+          repo_lc="${repo_lc,,}"
+          echo "ref=${REGISTRY}/${owner_lc}/${repo_lc}/${{ matrix.service.name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Docker tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.ref }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
