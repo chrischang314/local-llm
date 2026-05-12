@@ -1,0 +1,20 @@
+# CPU-only override for docker-compose.yml.
+#
+# Usage:
+#     docker compose -f docker-compose.yml -f docker-compose.cpu.yml up
+#
+# This drops the NVIDIA GPU reservation so the stack runs on machines
+# without a GPU (or where the NVIDIA Container Toolkit isn't installed).
+# It also swaps the default model-pull list for a single lightweight
+# model so the stack is usable on modest hardware.
+services:
+  ollama:
+    # Override: no `deploy.resources` block at all — Compose will use the
+    # default (no GPU reservation).
+    deploy: {}
+
+  ollama-init:
+    entrypoint: >
+      /bin/sh -c "
+        ollama pull llama3.2:3b
+      "
