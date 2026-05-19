@@ -99,6 +99,14 @@ kubectl -n local-llm describe deploy chris-pc-2-ollama-switch
 
 The Local LLM settings panel also lists optional workers under **Workers**. That panel uses the same switch Deployment, so turning `CHRIS-PC-2` on or off there is equivalent to scaling `chris-pc-2-ollama-switch` in the Kubernetes dashboard.
 
+If the live Local LLM app is the Helm-managed deployment in the `default` namespace, also apply the live app overrides after image updates:
+
+```powershell
+.\scripts\deploy-live-default-app-overrides.ps1
+```
+
+Those overrides give the live backend permission to read and scale the `local-llm` worker switch, and they load the same `mac-mini`/`chris-pc-2` routing configuration that the settings panel displays.
+
 ## Join a PC to the Cluster
 
 Use the join command from your cluster control plane. For kubeadm clusters it usually looks like:
