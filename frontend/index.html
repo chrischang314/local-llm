@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="style.css?v=20260518-ui" />
   <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/github-dark.min.css" />
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
@@ -17,6 +19,7 @@
         <div>
           <p class="eyebrow">Local LLM</p>
           <h1 id="login-title">Sign in</h1>
+          <p id="login-subtitle">Sign in to continue</p>
         </div>
       </div>
 
@@ -26,11 +29,19 @@
           <i data-lucide="user-round" aria-hidden="true"></i>
           <input id="username-input" type="text" placeholder="chris" autocomplete="username" required />
         </div>
-        <button type="submit" class="login-submit">
-          <span>Continue</span>
+
+        <label for="password-input">Password</label>
+        <div class="field-row">
+          <i data-lucide="lock-keyhole" aria-hidden="true"></i>
+          <input id="password-input" type="password" placeholder="Password" autocomplete="current-password" required minlength="4" />
+        </div>
+
+        <button type="submit" id="login-submit" class="login-submit">
+          <span>Sign in</span>
           <i data-lucide="arrow-right" aria-hidden="true"></i>
         </button>
       </form>
+      <p class="login-toggle"><a href="#" id="toggle-mode">Need an account? Register</a></p>
       <p id="login-error" class="error hidden"></p>
     </section>
   </div>
@@ -49,6 +60,10 @@
         <i data-lucide="plus" aria-hidden="true"></i>
         <span>New chat</span>
       </button>
+      <button id="settings-btn" class="secondary-action" type="button">
+        <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+        <span>Settings</span>
+      </button>
 
       <div class="sidebar-section-label">History</div>
       <nav id="conversations-list" aria-label="Saved conversations"></nav>
@@ -58,6 +73,10 @@
           <i data-lucide="file-text" aria-hidden="true"></i>
           <span>API docs</span>
         </a>
+        <div id="health-indicator" class="health-indicator" title="Backend status">
+          <span class="dot"></span>
+          <span class="label">checking...</span>
+        </div>
         <div class="user-strip">
           <span id="sidebar-username"></span>
           <button id="logout-btn" type="button" title="Log out" aria-label="Log out">
@@ -71,15 +90,17 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Workspace</p>
-          <h1>Chat</h1>
+          <h1 id="chat-title">Chat</h1>
         </div>
 
-        <div class="model-panel">
-          <label for="model-select">Model</label>
-          <select id="model-select">
-            <option value="">Loading models...</option>
-          </select>
-          <span id="model-status" class="status-pill">Checking Ollama</span>
+        <div class="header-controls">
+          <span id="token-counter" class="token-counter hidden" title="Estimated context size"></span>
+          <div class="model-panel">
+            <label for="model-select">Model</label>
+            <select id="model-select">
+              <option value="">Loading models...</option>
+            </select>
+          </div>
         </div>
       </header>
 
@@ -88,15 +109,76 @@
       <footer class="composer-wrap">
         <div class="composer">
           <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
-          <button id="send-btn" class="send-btn" type="button" aria-label="Send message">
+          <button id="send-btn" class="send-btn" type="button">
             <i data-lucide="send-horizontal" aria-hidden="true"></i>
-            <span class="btn-label">Send</span>
+            <span>Send</span>
+          </button>
+          <button id="stop-btn" class="send-btn stop-btn hidden" type="button">
+            <i data-lucide="square" aria-hidden="true"></i>
+            <span>Stop</span>
           </button>
         </div>
       </footer>
     </section>
   </div>
 
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-card">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow">Control panel</p>
+          <h2 id="settings-title">Settings</h2>
+        </div>
+        <button class="modal-close" id="settings-close" type="button" aria-label="Close">
+          <i data-lucide="x" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <section>
+          <h3>Conversation</h3>
+          <p class="hint">Applies to the active conversation. Changes save automatically.</p>
+
+          <label>System prompt
+            <textarea id="settings-system-prompt" rows="3" placeholder="Optional instructions the model follows for every message in this conversation."></textarea>
+          </label>
+
+          <div class="row">
+            <label>Temperature
+              <input type="range" id="settings-temperature" min="0" max="2" step="0.05" />
+              <span class="value-display" id="settings-temperature-val">0.70</span>
+            </label>
+            <label>Top P
+              <input type="range" id="settings-top-p" min="0" max="1" step="0.05" />
+              <span class="value-display" id="settings-top-p-val">0.90</span>
+            </label>
+            <label>Top K
+              <input type="number" id="settings-top-k" min="1" max="500" step="1" />
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <h3>Models</h3>
+          <p class="hint">Installed Ollama models. Pull a new one or remove an existing one.</p>
+
+          <div id="model-list" class="model-list">Loading...</div>
+
+          <div class="pull-row">
+            <input id="pull-model-name" type="text" placeholder="e.g. llama3.2:3b" />
+            <button id="pull-model-btn" type="button">Pull</button>
+          </div>
+          <pre id="pull-progress" class="pull-progress hidden"></pre>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    if (window.lucide) {
+      lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
+    }
+  </script>
   <script src="app.js?v=20260518-ui"></script>
 </body>
 </html>

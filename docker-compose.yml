@@ -41,10 +41,8 @@ services:
       - "8001:8000"
     environment:
       - OLLAMA_URL=http://ollama:11434
-      - SHARED_AUTH_DB=/shared-auth/auth.db
     volumes:
       - chat_data:/app/data
-      - shared_auth:/shared-auth
     depends_on:
       ollama-init:
         condition: service_completed_successfully
@@ -59,4 +57,3 @@ services:
 volumes:
   ollama_data:
   chat_data:
-  shared_auth:

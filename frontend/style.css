@@ -171,7 +171,11 @@ svg {
   color: var(--muted);
 }
 
-#username-input {
+#username-input,
+#password-input,
+#pull-model-name,
+.modal input[type="number"],
+.modal textarea {
   width: 100%;
   min-width: 0;
   border: 0;
@@ -181,6 +185,8 @@ svg {
 }
 
 #username-input::placeholder,
+#password-input::placeholder,
+#pull-model-name::placeholder,
 #input::placeholder {
   color: #92a09a;
 }
@@ -252,6 +258,25 @@ svg {
 .primary-action {
   width: 100%;
   margin-bottom: 18px;
+}
+
+.secondary-action {
+  width: 100%;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: var(--sidebar-text);
+  background: transparent;
+  border: 1px solid var(--sidebar-line);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.secondary-action:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .sidebar-section-label {
@@ -378,6 +403,41 @@ svg {
   padding-top: 14px;
 }
 
+.health-indicator {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  color: var(--sidebar-muted);
+  border: 1px solid var(--sidebar-line);
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
+.health-indicator .dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  background: #f59e0b;
+  border-radius: 50%;
+}
+
+.health-indicator.ok .dot {
+  background: #22c55e;
+}
+
+.health-indicator.down .dot {
+  background: #ef4444;
+}
+
+.health-indicator .label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .docs-link,
 .user-strip {
   min-height: 42px;
@@ -447,10 +507,39 @@ svg {
   line-height: 1.1;
 }
 
+.header-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.token-counter {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  color: var(--muted-strong);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.token-counter.warn {
+  color: var(--warning);
+  background: #fff7e6;
+}
+
+.token-counter.danger {
+  color: var(--danger);
+  background: #fff0ed;
+}
+
 .model-panel {
   min-width: min(100%, 330px);
   display: grid;
-  grid-template-columns: auto minmax(150px, 1fr) auto;
+  grid-template-columns: auto minmax(150px, 1fr);
   align-items: center;
   gap: 9px;
   padding: 8px;
@@ -573,14 +662,16 @@ svg {
 
 .message {
   width: min(100%, 820px);
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  align-self: flex-start;
 }
 
 .message.user {
   align-self: flex-end;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: flex-end;
 }
 
 .message.user .message-avatar {
@@ -700,6 +791,7 @@ svg {
 }
 
 .message.assistant .bubble pre {
+  position: relative;
   margin: 12px 0;
   padding: 14px;
   overflow-x: auto;
@@ -750,6 +842,68 @@ svg {
 .message.assistant .bubble a {
   color: var(--accent);
   font-weight: 700;
+}
+
+.message-actions,
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message.user .message-actions,
+.message.user .edit-actions {
+  justify-content: flex-end;
+}
+
+.message-actions button,
+.edit-actions button,
+.code-copy-btn,
+#pull-model-btn,
+.model-list button {
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--muted-strong);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.message-actions button:hover,
+.edit-actions button:hover,
+.code-copy-btn:hover,
+#pull-model-btn:hover,
+.model-list button:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.edit-textarea {
+  width: min(100%, 760px);
+  min-height: 120px;
+  padding: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  line-height: 1.5;
+  outline: 0;
+  resize: vertical;
+}
+
+.code-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: #d7e5df;
+  background: #26352f;
+  border-color: #344841;
+}
+
+.code-copy-btn.copied {
+  color: #bbf7d0;
 }
 
 .cursor {
@@ -813,6 +967,192 @@ svg {
   background: #d9e1dd;
 }
 
+.stop-btn {
+  background: var(--danger);
+}
+
+.stop-btn:hover {
+  background: #8f1d14;
+}
+
+/* Settings modal */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(23, 33, 29, 0.48);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  width: min(100%, 780px);
+  max-height: min(90dvh, 820px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h2 {
+  margin-top: 2px;
+  font-size: 1.28rem;
+}
+
+.modal-close {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: var(--muted-strong);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.modal-body {
+  display: grid;
+  gap: 22px;
+  overflow-y: auto;
+  padding: 22px;
+}
+
+.modal-body section {
+  display: grid;
+  gap: 14px;
+}
+
+.modal-body h3 {
+  font-size: 1rem;
+}
+
+.hint,
+.login-toggle,
+#login-subtitle {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.login-toggle a {
+  color: var(--accent);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.modal-body label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted-strong);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.modal textarea,
+.modal input[type="number"],
+#pull-model-name {
+  min-height: 42px;
+  padding: 10px 11px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.modal textarea {
+  resize: vertical;
+}
+
+.modal input[type="range"] {
+  width: 100%;
+}
+
+.modal-body .row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.value-display {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.model-list {
+  display: grid;
+  gap: 8px;
+}
+
+.model-list .row {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.model-list .name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-list .size {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.pull-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+#pull-model-btn {
+  min-height: 42px;
+  padding: 0 16px;
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+#pull-model-btn:hover {
+  color: #ffffff;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.pull-progress {
+  max-height: 170px;
+  overflow: auto;
+  padding: 12px;
+  color: #eef7f2;
+  background: #17211d;
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
 @media (max-width: 920px) {
   .app-shell {
     grid-template-columns: 252px minmax(0, 1fr);
@@ -860,6 +1200,11 @@ svg {
     grid-template-columns: 1fr;
   }
 
+  .header-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .status-pill {
     justify-content: flex-start;
   }
@@ -871,16 +1216,7 @@ svg {
   .message,
   .message.user {
     width: 100%;
-    grid-template-columns: 30px minmax(0, 1fr);
-  }
-
-  .message.user .message-avatar {
-    grid-column: 1;
-  }
-
-  .message.user .message-body {
-    grid-column: 2;
-    align-items: flex-start;
+    align-items: stretch;
   }
 
   .message.user .bubble,
@@ -898,6 +1234,11 @@ svg {
 
   .send-btn {
     width: 100%;
+  }
+
+  .modal-body .row,
+  .pull-row {
+    grid-template-columns: 1fr;
   }
 }
 

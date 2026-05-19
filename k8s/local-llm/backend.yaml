@@ -20,8 +20,8 @@ spec:
     spec:
       containers:
         - name: backend
-          image: local-llm-backend:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/chrischang314/local-llm/backend:latest
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
@@ -36,7 +36,7 @@ spec:
               mountPath: /app/data
           readinessProbe:
             httpGet:
-              path: /routing/status
+              path: /health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
