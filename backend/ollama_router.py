@@ -181,7 +181,10 @@ class OllamaRouter:
             "available": False,
             "models": [],
             "model_names": set(),
+            "loaded_models": [],
+            "loaded_model_names": set(),
             "error": None,
+            "runtime_error": None,
         }
 
         if not backend.enabled:
@@ -200,11 +203,45 @@ class OllamaRouter:
                     for model in models
                     if model.get("name") or model.get("model")
                 }
+                try:
+                    runtime_response = await client.get(f"{backend.url}/api/ps")
+                    runtime_response.raise_for_status()
+                    loaded_models = runtime_response.json().get("models", [])
+                    state["loaded_models"] = loaded_models
+                    state["loaded_model_names"] = {
+                        model.get("name") or model.get("model")
+                        for model in loaded_models
+                        if model.get("name") or model.get("model")
+                    }
+                except httpx.HTTPError as exc:
+                    state["runtime_error"] = str(exc)
         except httpx.HTTPError as exc:
             state["error"] = str(exc)
 
         self._health_cache[backend.name] = (now, state)
         return state
+
+    async def model_runtime_status(self, backend: OllamaBackend, model: str) -> dict[str, Any]:
+        """Return whether a model is currently resident on a backend."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{backend.url}/api/ps")
+                response.raise_for_status()
+                for loaded in response.json().get("models", []):
+                    name = loaded.get("name") or loaded.get("model")
+                    if name == model:
+                        return {
+                            "loaded": True,
+                            "model": name,
+                            "expires_at": loaded.get("expires_at"),
+                            "size": loaded.get("size"),
+                            "size_vram": loaded.get("size_vram"),
+                            "context_length": loaded.get("context_length"),
+                        }
+        except httpx.HTTPError as exc:
+            return {"loaded": False, "error": str(exc)}
+
+        return {"loaded": False}
 
     def _backend_can_run_model(self, backend: OllamaBackend, state: dict[str, Any], model: str) -> bool:
         configured_models = set(backend.models)
@@ -232,9 +269,14 @@ class OllamaRouter:
                 "weight": backend.weight,
                 "configured_models": list(backend.models),
                 "available_models": sorted(health[backend.name]["model_names"]),
+                "loaded_models": sorted(
+                    health[backend.name]["loaded_models"],
+                    key=lambda model: model.get("name") or model.get("model") or "",
+                ),
                 "in_flight": self._in_flight.get(backend.name, 0),
                 "labels": backend.labels,
                 "error": health[backend.name]["error"],
+                "runtime_error": health[backend.name]["runtime_error"],
             }
             for backend in backends
         ]

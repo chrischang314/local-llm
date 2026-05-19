@@ -11,7 +11,63 @@ metadata:
   namespace: default
 data:
   OLLAMA_BACKENDS: |
-    {"backends":[{"name":"mac-mini","url":"http://host.lima.internal:11434","priority":20,"weight":1,"enabled":true,"essential":true,"labels":{"host":"mac-mini"}},{"name":"chris-pc-2","url":"http://192.168.4.24:11434","priority":5,"weight":3,"enabled":true,"essential":false,"models":["llama3.2:3b"],"labels":{"host":"CHRIS-PC-2","gpu":"RTX 5070","vram":"12GB","pool":"external"}}],"model_preferences":{"llama3.2:3b":["chris-pc-2","mac-mini"]}}
+    {
+      "backends": [
+        {
+          "name": "mac-mini",
+          "url": "http://host.lima.internal:11434",
+          "priority": 20,
+          "weight": 1,
+          "enabled": true,
+          "essential": true,
+          "models": ["llama3.2:1b", "llama3.2:3b", "qwen2.5:3b", "phi3:mini"],
+          "labels": {
+            "host": "mac-mini",
+            "tier": "small",
+            "optional": "false"
+          }
+        },
+        {
+          "name": "chris-pc-2",
+          "url": "http://192.168.4.24:11434",
+          "priority": 5,
+          "weight": 3,
+          "enabled": true,
+          "essential": false,
+          "models": [
+            "llama3.2:1b",
+            "llama3.2:3b",
+            "qwen2.5:3b",
+            "phi3:mini",
+            "gemma3:4b",
+            "mistral:7b",
+            "llama3.1:8b",
+            "qwen2.5:7b",
+            "qwen2.5-coder:7b",
+            "deepseek-r1:7b"
+          ],
+          "labels": {
+            "host": "CHRIS-PC-2",
+            "gpu": "RTX 5070",
+            "vram": "12GB",
+            "tier": "large",
+            "pool": "external"
+          }
+        }
+      ],
+      "model_preferences": {
+        "llama3.2:1b": ["mac-mini", "chris-pc-2"],
+        "llama3.2:3b": ["chris-pc-2", "mac-mini"],
+        "qwen2.5:3b": ["mac-mini", "chris-pc-2"],
+        "phi3:mini": ["mac-mini", "chris-pc-2"],
+        "gemma3:4b": ["chris-pc-2"],
+        "mistral:7b": ["chris-pc-2"],
+        "llama3.1:8b": ["chris-pc-2"],
+        "qwen2.5:7b": ["chris-pc-2"],
+        "qwen2.5-coder:7b": ["chris-pc-2"],
+        "deepseek-r1:7b": ["chris-pc-2"]
+      }
+    }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

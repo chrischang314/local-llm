@@ -515,9 +515,11 @@ async def list_workers(_: dict = Depends(current_user)):
             "essential": bool(backend.get("essential", False)),
             "configured_models": backend.get("configured_models", []),
             "available_models": backend.get("available_models", []),
+            "loaded_models": backend.get("loaded_models", []),
             "in_flight": backend.get("in_flight", 0),
             "labels": backend.get("labels", {}),
             "error": backend.get("error"),
+            "runtime_error": backend.get("runtime_error"),
             "controllable": switch is not None and control_error is None,
             "control": switch,
         })
@@ -750,6 +752,8 @@ async def chat(
         selected_backend = await ollama_router.choose_backend(model)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    model_runtime = await ollama_router.model_runtime_status(selected_backend, model)
+    model_status = "resident" if model_runtime.get("loaded") else "loading"
 
     async def stream_and_save():
         full_response = ""
@@ -799,6 +803,9 @@ async def chat(
         headers={
             "X-Conversation-Id": str(conversation_id),
             "X-LLM-Backend": selected_backend.name,
+            "X-LLM-Model-Status": model_status,
+            "X-LLM-Model-Loaded": "true" if model_runtime.get("loaded") else "false",
+            "X-LLM-Model-Expires-At": model_runtime.get("expires_at") or "",
         },
     )
 
@@ -849,6 +856,13 @@ async def v1_chat_completions(request: ApiChatRequest):
         selected_backend = await ollama_router.choose_backend(request.model)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    model_runtime = await ollama_router.model_runtime_status(selected_backend, request.model)
+    response_headers = {
+        "X-LLM-Backend": selected_backend.name,
+        "X-LLM-Model-Status": "resident" if model_runtime.get("loaded") else "loading",
+        "X-LLM-Model-Loaded": "true" if model_runtime.get("loaded") else "false",
+        "X-LLM-Model-Expires-At": model_runtime.get("expires_at") or "",
+    }
 
     options = {}
     if request.temperature is not None:
@@ -914,7 +928,7 @@ async def v1_chat_completions(request: ApiChatRequest):
         return StreamingResponse(
             sse_stream(),
             media_type="text/event-stream",
-            headers={"X-LLM-Backend": selected_backend.name},
+            headers=response_headers,
         )
 
     try:
@@ -948,5 +962,5 @@ async def v1_chat_completions(request: ApiChatRequest):
                 "total_tokens": prompt_tokens + completion_tokens,
             },
         },
-        headers={"X-LLM-Backend": selected_backend.name},
+        headers=response_headers,
     )

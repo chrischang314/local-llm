@@ -633,6 +633,7 @@ async function runChatStream({ regenerate }) {
 
   let assistantContent = "";
   let aborted = false;
+  let statusEl = null;
 
   try {
     const body = {
@@ -666,12 +667,25 @@ async function runChatStream({ regenerate }) {
     const returnedId = res.headers.get("X-Conversation-Id");
     if (returnedId) currentConversationId = parseInt(returnedId, 10);
 
+    const backendName = res.headers.get("X-LLM-Backend");
+    const modelStatus = res.headers.get("X-LLM-Model-Status");
+    if (modelStatus === "loading") {
+      statusEl = document.createElement("span");
+      statusEl.className = "stream-status";
+      statusEl.textContent = `Loading ${model} on ${backendName || "worker"}...`;
+      bubble.insertBefore(statusEl, cursor);
+    }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (statusEl) {
+        statusEl.remove();
+        statusEl = null;
+      }
       assistantContent += decoder.decode(value, { stream: true });
       bubble.innerHTML = renderMarkdown(assistantContent);
       bubble.appendChild(cursor);
@@ -689,6 +703,7 @@ async function runChatStream({ regenerate }) {
       bubble.textContent = `Error: ${err.message}`;
     }
   } finally {
+    if (statusEl) statusEl.remove();
     cursor.remove();
     if (assistantContent) {
       enhanceCodeBlocks(bubble);
@@ -915,8 +930,22 @@ function workerSummary(worker) {
   const models = worker.available_models?.length
     ? worker.available_models.join(", ")
     : worker.configured_models?.join(", ") || "no models";
+  const resident = worker.loaded_models?.length
+    ? `resident: ${worker.loaded_models.map(loadedModelSummary).join(", ")}`
+    : "resident: none; loads on demand";
   const active = worker.in_flight ? `${worker.in_flight} active` : "idle";
-  return `${actual}/${desired} - ${active} - ${models}`;
+  return `${actual}/${desired} - ${active} - ${resident} - installed: ${models}`;
+}
+
+function loadedModelSummary(model) {
+  const name = model.name || model.model || "model";
+  if (!model.expires_at) return name;
+  const expiresAt = new Date(model.expires_at).getTime();
+  if (Number.isNaN(expiresAt)) return name;
+  const ms = expiresAt - Date.now();
+  if (ms <= 0) return `${name} evicting`;
+  const minutes = Math.max(1, Math.round(ms / 60000));
+  return `${name} evicts in ${minutes}m`;
 }
 
 async function setWorkerState(name, enabled, button) {

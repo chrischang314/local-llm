@@ -1,0 +1,8 @@
+services:
+  chris-pc-2-ollama:
+    environment:
+      - OLLAMA_MODELS=/models
+    volumes:
+      - type: bind
+        source: ${OLLAMA_MODELS_PATH}
+        target: /models

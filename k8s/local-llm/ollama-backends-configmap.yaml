@@ -14,7 +14,18 @@ data:
           "weight": 3,
           "enabled": true,
           "essential": false,
-          "models": ["qwen2.5:14b", "llama3.1:8b", "llama3.2:3b"],
+          "models": [
+            "llama3.2:1b",
+            "llama3.2:3b",
+            "qwen2.5:3b",
+            "phi3:mini",
+            "gemma3:4b",
+            "mistral:7b",
+            "llama3.1:8b",
+            "qwen2.5:7b",
+            "qwen2.5-coder:7b",
+            "deepseek-r1:7b"
+          ],
           "labels": {
             "gpu": "nvidia",
             "gpu_model": "rtx-5070",
@@ -25,12 +36,12 @@ data:
         },
         {
           "name": "mac-mini",
-          "url": "http://mac-mini.lan:11434",
+          "url": "http://host.lima.internal:11434",
           "priority": 60,
           "weight": 1,
           "enabled": true,
           "essential": true,
-          "models": ["llama3.2:3b"],
+          "models": ["llama3.2:1b", "llama3.2:3b", "qwen2.5:3b", "phi3:mini"],
           "labels": {
             "tier": "small",
             "optional": "false"
@@ -38,8 +49,15 @@ data:
         }
       ],
       "model_preferences": {
-        "qwen2.5:14b": ["chris-pc-2"],
+        "llama3.2:1b": ["mac-mini", "chris-pc-2"],
+        "qwen2.5:3b": ["mac-mini", "chris-pc-2"],
+        "phi3:mini": ["mac-mini", "chris-pc-2"],
+        "gemma3:4b": ["chris-pc-2"],
+        "mistral:7b": ["chris-pc-2"],
         "llama3.1:8b": ["chris-pc-2"],
+        "qwen2.5:7b": ["chris-pc-2"],
+        "qwen2.5-coder:7b": ["chris-pc-2"],
+        "deepseek-r1:7b": ["chris-pc-2"],
         "llama3.2:3b": ["chris-pc-2", "mac-mini"]
       }
     }

@@ -919,6 +919,19 @@ svg {
   animation: blink 0.85s step-end infinite;
 }
 
+.stream-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 9px;
+  color: #52625d;
+  background: #edf4f1;
+  border: 1px solid #d5e3dd;
+  border-radius: 7px;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 @keyframes blink {
   50% { opacity: 0; }
 }

@@ -52,6 +52,10 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       serviceAccountName: local-llm-backend
+      hostAliases:
+        - ip: 192.168.5.2
+          hostnames:
+            - host.lima.internal
       containers:
         - name: backend
           image: ghcr.io/chrischang314/local-llm/backend:latest

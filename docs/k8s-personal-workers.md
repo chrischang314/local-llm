@@ -107,6 +107,19 @@ If the live Local LLM app is the Helm-managed deployment in the `default` namesp
 
 Those overrides give the live backend permission to read and scale the `local-llm` worker switch, and they load the same `mac-mini`/`chris-pc-2` routing configuration that the settings panel displays.
 
+## Model Storage and Residency
+
+The cluster has a `synology-nfs` storage class. Native Linux/K8s Ollama workers use a shared `local-llm/ollama-model-cache` PVC mounted at `/models`, with `OLLAMA_MODELS=/models`. That lets K8s workers share downloaded model files instead of pulling the same model separately on each node.
+
+This is best for native Linux workers. For `CHRIS-PC-2`, which is currently an external Windows Docker worker, keep the local Docker volume unless the Synology model share is mounted into Docker Desktop/WSL first. After that, the optional override can be used:
+
+```powershell
+$env:OLLAMA_MODELS_PATH = "C:\path\to\mounted\synology\ollama-models"
+docker compose -f docker-compose.pc-worker.yml -f docker-compose.pc-worker.nfs.example.yml up -d
+```
+
+The backend checks Ollama's running-model endpoint and exposes installed models separately from resident models. The website shows when a model is loaded in memory/VRAM, when it will be evicted, and when a chat request is waiting for Ollama to load a model.
+
 ## Join a PC to the Cluster
 
 Use the join command from your cluster control plane. For kubeadm clusters it usually looks like:

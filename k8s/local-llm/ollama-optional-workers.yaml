@@ -1,3 +1,19 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-model-cache
+  namespace: local-llm
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/component: model-cache
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: synology-nfs
+  resources:
+    requests:
+      storage: 250Gi
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -42,9 +58,17 @@ spec:
               value: 0.0.0.0:11434
             - name: OLLAMA_KEEP_ALIVE
               value: 10m
+            - name: OLLAMA_MODELS
+              value: /models
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
           volumeMounts:
             - name: ollama-data
               mountPath: /root/.ollama
+            - name: ollama-model-cache
+              mountPath: /models
           readinessProbe:
             httpGet:
               path: /api/tags
@@ -62,3 +86,6 @@ spec:
           hostPath:
             path: /var/lib/local-llm/ollama
             type: DirectoryOrCreate
+        - name: ollama-model-cache
+          persistentVolumeClaim:
+            claimName: ollama-model-cache
