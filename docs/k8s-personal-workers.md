@@ -11,7 +11,7 @@ kubectl label node raspberry-pi-1 local-llm.io/optional=false --overwrite
 kubectl label node mac-mini local-llm.io/optional=false --overwrite
 ```
 
-Label personal PCs as optional LLM workers:
+Label personal PCs as optional LLM workers when they are real Linux K8s nodes:
 
 ```powershell
 kubectl label node gaming-pc-5080 local-llm.io/optional=true --overwrite
@@ -25,6 +25,42 @@ kubectl label node spare-pc local-llm.io/perf-tier=medium --overwrite
 ```
 
 The `scripts/k8s-worker-mode.ps1` script refuses to change any node that does not have `local-llm.io/optional=true`.
+
+## CHRIS-PC-2 Optional Worker
+
+`CHRIS-PC-2` is currently integrated as an external optional Ollama backend instead of a native K8s node because this machine is Windows 11 and only has Docker Desktop's internal WSL distro available. K3s worker nodes need a durable Linux environment, but the backend can still route model requests to this PC over the LAN.
+
+Current endpoint:
+
+```text
+http://192.168.4.24:11434
+```
+
+Hardware detected:
+
+```text
+NVIDIA GeForce RTX 5070, 12 GB VRAM
+```
+
+Start it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 -Mode on
+```
+
+Stop it before gaming:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 -Mode off
+```
+
+Pull the default routed model:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 -Mode pull -Model llama3.2:3b
+```
+
+The backend config map lists `chris-pc-2` first for `llama3.2:3b`, `llama3.1:8b`, and `qwen2.5:14b`. The router still confirms the model is actually installed before choosing the PC.
 
 ## Join a PC to the Cluster
 

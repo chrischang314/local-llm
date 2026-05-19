@@ -8,29 +8,18 @@ data:
     {
       "backends": [
         {
-          "name": "gaming-pc-5080",
-          "url": "http://gaming-pc-5080.lan:11434",
+          "name": "chris-pc-2",
+          "url": "http://192.168.4.24:11434",
           "priority": 10,
-          "weight": 4,
+          "weight": 3,
           "enabled": true,
           "essential": false,
-          "models": ["gemma2:27b", "qwen2.5:14b", "llama3.1:8b", "llama3.2:3b"],
+          "models": ["qwen2.5:14b", "llama3.1:8b", "llama3.2:3b"],
           "labels": {
             "gpu": "nvidia",
+            "gpu_model": "rtx-5070",
             "tier": "large",
-            "optional": "true"
-          }
-        },
-        {
-          "name": "spare-pc",
-          "url": "http://spare-pc.lan:11434",
-          "priority": 30,
-          "weight": 2,
-          "enabled": true,
-          "essential": false,
-          "models": ["llama3.1:8b", "llama3.2:3b"],
-          "labels": {
-            "tier": "medium",
+            "host": "windows-docker",
             "optional": "true"
           }
         },
@@ -49,9 +38,8 @@ data:
         }
       ],
       "model_preferences": {
-        "gemma2:27b": ["gaming-pc-5080"],
-        "qwen2.5:14b": ["gaming-pc-5080"],
-        "llama3.1:8b": ["gaming-pc-5080", "spare-pc"],
-        "llama3.2:3b": ["mac-mini", "spare-pc", "gaming-pc-5080"]
+        "qwen2.5:14b": ["chris-pc-2"],
+        "llama3.1:8b": ["chris-pc-2"],
+        "llama3.2:3b": ["chris-pc-2", "mac-mini"]
       }
     }
