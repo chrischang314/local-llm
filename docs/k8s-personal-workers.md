@@ -62,6 +62,41 @@ powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 
 
 The backend config map lists `chris-pc-2` first for `llama3.2:3b`, `llama3.1:8b`, and `qwen2.5:14b`. The router still confirms the model is actually installed before choosing the PC.
 
+## Dashboard On/Off Control
+
+`CHRIS-PC-2` also has a Kubernetes dashboard switch:
+
+```text
+namespace: local-llm
+deployment: chris-pc-2-ollama-switch
+```
+
+Scale that deployment from the Kubernetes dashboard:
+
+- `replicas: 1` turns the local PC worker on.
+- `replicas: 0` turns the local PC worker off.
+
+The switch pod is intentionally tiny and does not run the model. It gives the Kubernetes control panel a normal Deployment object to scale. A watcher on `CHRIS-PC-2` observes that desired replica count and starts or stops the local Docker Ollama container.
+
+Install the watcher on `CHRIS-PC-2`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-local-ollama-worker-controller.ps1
+```
+
+Run one sync manually:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-controller.ps1 -Once
+```
+
+Check the switch state from kubectl:
+
+```powershell
+kubectl -n local-llm get deploy chris-pc-2-ollama-switch
+kubectl -n local-llm describe deploy chris-pc-2-ollama-switch
+```
+
 ## Join a PC to the Cluster
 
 Use the join command from your cluster control plane. For kubeadm clusters it usually looks like:
