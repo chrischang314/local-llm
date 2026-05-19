@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Docs - Local LLM</title>
+  <link rel="stylesheet" href="style.css?v=20260518-ui" />
+  <link rel="stylesheet" href="docs.css?v=20260518-ui" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div class="docs-layout">
+    <aside class="docs-sidebar">
+      <div class="docs-brand">
+        <a href="index.html" class="back-link">
+          <i data-lucide="arrow-left" aria-hidden="true"></i>
+          <span>Back to chat</span>
+        </a>
+        <p class="eyebrow">Local LLM</p>
+        <h1>API docs</h1>
+      </div>
+
+      <nav aria-label="API sections">
+        <a href="#overview">Overview</a>
+        <a href="#base-url">Base URL</a>
+        <span class="nav-section">Endpoints</span>
+        <a href="#list-models">GET /v1/models</a>
+        <a href="#chat-completions">POST /v1/chat/completions</a>
+        <span class="nav-section">Examples</span>
+        <a href="#example-curl">cURL</a>
+        <a href="#example-python">Python</a>
+        <a href="#example-js">JavaScript</a>
+      </nav>
+    </aside>
+
+    <main class="docs-main">
+      <section id="overview" class="docs-hero">
+        <p class="eyebrow">OpenAI-compatible</p>
+        <h2>Use your local models from code.</h2>
+        <p>
+          This app exposes a REST API that follows the OpenAI chat completions shape for
+          model listing, streaming responses, and non-streaming responses.
+        </p>
+      </section>
+
+      <section id="base-url">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="link" aria-hidden="true"></i></span>
+          <h2>Base URL</h2>
+        </div>
+        <p>Docker compose exposes the backend on port <code>8001</code>.</p>
+
+        <div class="code-block">
+          <div class="code-label">OpenAI SDK base URL</div>
+          <pre><code>http://localhost:8001/v1</code></pre>
+        </div>
+
+        <div class="code-block">
+          <div class="code-label">FastAPI explorer</div>
+          <pre><code>http://localhost:8001/docs</code></pre>
+        </div>
+      </section>
+
+      <section id="list-models">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="list-tree" aria-hidden="true"></i></span>
+          <h2>List Models</h2>
+        </div>
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/v1/models</span>
+        </div>
+        <p>Returns the models currently available in Ollama.</p>
+
+        <div class="code-block">
+          <div class="code-label">Response</div>
+          <pre><code>{
+  "object": "list",
+  "data": [
+    {
+      "id": "llama3.2:3b",
+      "object": "model",
+      "created": 1713400000,
+      "owned_by": "local"
+    }
+  ]
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="chat-completions">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="messages-square" aria-hidden="true"></i></span>
+          <h2>Chat Completions</h2>
+        </div>
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/v1/chat/completions</span>
+        </div>
+        <p>Send messages to an Ollama model and receive an OpenAI-style response.</p>
+
+        <h3>Request Body</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>model</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>Model ID, such as <code>llama3.2:3b</code>.</td>
+            </tr>
+            <tr>
+              <td><code>messages</code></td>
+              <td>array</td>
+              <td>Yes</td>
+              <td>Array of <code>{ role, content }</code> messages.</td>
+            </tr>
+            <tr>
+              <td><code>stream</code></td>
+              <td>boolean</td>
+              <td>No</td>
+              <td>Return server-sent events when <code>true</code>.</td>
+            </tr>
+            <tr>
+              <td><code>temperature</code></td>
+              <td>number</td>
+              <td>No</td>
+              <td>Sampling temperature.</td>
+            </tr>
+            <tr>
+              <td><code>max_tokens</code></td>
+              <td>integer</td>
+              <td>No</td>
+              <td>Maximum generated tokens.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Response</h3>
+        <div class="code-block">
+          <div class="code-label">stream: false</div>
+          <pre><code>{
+  "id": "chatcmpl-a1b2c3d4e5f6",
+  "object": "chat.completion",
+  "created": 1713400000,
+  "model": "llama3.2:3b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Docker is a platform for running applications in containers..."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 48,
+    "total_tokens": 60
+  }
+}</code></pre>
+        </div>
+
+        <div class="code-block">
+          <div class="code-label">stream: true</div>
+          <pre><code>data: {"id":"chatcmpl-a1b2c3d4e5f6","object":"chat.completion.chunk","choices":[{"delta":{"content":"Docker"}}]}
+
+data: {"id":"chatcmpl-a1b2c3d4e5f6","object":"chat.completion.chunk","choices":[{"delta":{"content":" is"}}]}
+
+data: [DONE]</code></pre>
+        </div>
+      </section>
+
+      <section id="example-curl">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="terminal" aria-hidden="true"></i></span>
+          <h2>cURL</h2>
+        </div>
+        <div class="code-block">
+          <div class="code-label">List models</div>
+          <pre><code>curl http://localhost:8001/v1/models</code></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label">Chat</div>
+          <pre><code>curl http://localhost:8001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "messages": [
+      { "role": "user", "content": "What is Docker?" }
+    ]
+  }'</code></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label">Streaming</div>
+          <pre><code>curl http://localhost:8001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "messages": [
+      { "role": "user", "content": "What is Docker?" }
+    ],
+    "stream": true
+  }'</code></pre>
+        </div>
+      </section>
+
+      <section id="example-python">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="braces" aria-hidden="true"></i></span>
+          <h2>Python</h2>
+        </div>
+        <div class="code-block">
+          <div class="code-label">OpenAI client</div>
+          <pre><code>from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8001/v1",
+    api_key="not-needed",
+)
+
+response = client.chat.completions.create(
+    model="llama3.2:3b",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is Docker?"},
+    ],
+)
+
+print(response.choices[0].message.content)</code></pre>
+        </div>
+      </section>
+
+      <section id="example-js">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="file-code-2" aria-hidden="true"></i></span>
+          <h2>JavaScript</h2>
+        </div>
+        <div class="code-block">
+          <div class="code-label">fetch</div>
+          <pre><code>const response = await fetch("http://localhost:8001/v1/chat/completions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model: "llama3.2:3b",
+    messages: [
+      { role: "user", content: "What is Docker?" }
+    ],
+  }),
+});
+
+const data = await response.json();
+console.log(data.choices[0].message.content);</code></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    if (window.lucide) {
+      lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
+    }
+  </script>
+</body>
+</html>

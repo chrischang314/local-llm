@@ -3,52 +3,100 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Local LLM Chat</title>
-  <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+  <title>Local LLM</title>
+  <link rel="stylesheet" href="style.css?v=20260518-ui" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
+  <div id="login-screen" class="auth-view">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"><i data-lucide="bot-message-square"></i></span>
+        <div>
+          <p class="eyebrow">Local LLM</p>
+          <h1 id="login-title">Sign in</h1>
+        </div>
+      </div>
 
-  <div id="login-screen">
-    <div class="login-card">
-      <h1>Local LLM Chat</h1>
-      <p>Enter your username to continue</p>
-      <form id="login-form">
-        <input id="username-input" type="text" placeholder="Username" autocomplete="username" required />
-        <button type="submit">Continue</button>
+      <form id="login-form" class="login-form">
+        <label for="username-input">Username</label>
+        <div class="field-row">
+          <i data-lucide="user-round" aria-hidden="true"></i>
+          <input id="username-input" type="text" placeholder="chris" autocomplete="username" required />
+        </div>
+        <button type="submit" class="login-submit">
+          <span>Continue</span>
+          <i data-lucide="arrow-right" aria-hidden="true"></i>
+        </button>
       </form>
       <p id="login-error" class="error hidden"></p>
-    </div>
+    </section>
   </div>
 
-  <div id="app" class="hidden">
-    <aside id="sidebar">
-      <div class="sidebar-header">
-        <span id="sidebar-username"></span>
-        <button id="logout-btn" title="Log out">&#x21A9;</button>
+  <div id="app" class="app-shell hidden">
+    <aside id="sidebar" aria-label="Conversations">
+      <div class="sidebar-brand">
+        <span class="brand-mark small" aria-hidden="true"><i data-lucide="bot-message-square"></i></span>
+        <div>
+          <p class="eyebrow">Local LLM</p>
+          <strong>Chat</strong>
+        </div>
       </div>
-      <button id="new-chat-btn">+ New Chat</button>
-      <nav id="conversations-list"></nav>
+
+      <button id="new-chat-btn" class="primary-action" type="button">
+        <i data-lucide="plus" aria-hidden="true"></i>
+        <span>New chat</span>
+      </button>
+
+      <div class="sidebar-section-label">History</div>
+      <nav id="conversations-list" aria-label="Saved conversations"></nav>
+
+      <div class="sidebar-footer">
+        <a href="docs.html" class="docs-link">
+          <i data-lucide="file-text" aria-hidden="true"></i>
+          <span>API docs</span>
+        </a>
+        <div class="user-strip">
+          <span id="sidebar-username"></span>
+          <button id="logout-btn" type="button" title="Log out" aria-label="Log out">
+            <i data-lucide="log-out" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
     </aside>
 
-    <div class="main">
-      <header>
-        <h1>Local LLM Chat</h1>
-        <select id="model-select">
-          <option value="">Loading models...</option>
-        </select>
+    <section class="main" aria-label="Chat workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Workspace</p>
+          <h1>Chat</h1>
+        </div>
+
+        <div class="model-panel">
+          <label for="model-select">Model</label>
+          <select id="model-select">
+            <option value="">Loading models...</option>
+          </select>
+          <span id="model-status" class="status-pill">Checking Ollama</span>
+        </div>
       </header>
 
-      <main id="messages"></main>
+      <main id="messages" class="messages" aria-live="polite"></main>
 
-      <footer>
-        <textarea id="input" placeholder="Ask something..." rows="1"></textarea>
-        <button id="send-btn">Send</button>
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
+          <button id="send-btn" class="send-btn" type="button" aria-label="Send message">
+            <i data-lucide="send-horizontal" aria-hidden="true"></i>
+            <span class="btn-label">Send</span>
+          </button>
+        </div>
       </footer>
-    </div>
+    </section>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260518-ui"></script>
 </body>
 </html>

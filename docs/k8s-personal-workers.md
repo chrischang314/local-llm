@@ -1,0 +1,97 @@
+# Kubernetes Personal Worker Nodes
+
+This setup lets personal PCs contribute Ollama capacity when they are available, while keeping essential nodes such as Raspberry Pis and the Mac mini out of the gaming/offline controls.
+
+## Node Labels
+
+Label essential nodes so automation can identify them but never disable them:
+
+```powershell
+kubectl label node raspberry-pi-1 local-llm.io/optional=false --overwrite
+kubectl label node mac-mini local-llm.io/optional=false --overwrite
+```
+
+Label personal PCs as optional LLM workers:
+
+```powershell
+kubectl label node gaming-pc-5080 local-llm.io/optional=true --overwrite
+kubectl label node gaming-pc-5080 local-llm.io/ollama=true --overwrite
+kubectl label node gaming-pc-5080 local-llm.io/gpu=nvidia --overwrite
+kubectl label node gaming-pc-5080 local-llm.io/perf-tier=large --overwrite
+
+kubectl label node spare-pc local-llm.io/optional=true --overwrite
+kubectl label node spare-pc local-llm.io/ollama=true --overwrite
+kubectl label node spare-pc local-llm.io/perf-tier=medium --overwrite
+```
+
+The `scripts/k8s-worker-mode.ps1` script refuses to change any node that does not have `local-llm.io/optional=true`.
+
+## Join a PC to the Cluster
+
+Use the join command from your cluster control plane. For kubeadm clusters it usually looks like:
+
+```powershell
+kubeadm token create --print-join-command
+```
+
+Run the printed join command on the PC. After the node appears:
+
+```powershell
+kubectl get nodes -o wide
+kubectl label node <pc-node-name> local-llm.io/optional=true local-llm.io/ollama=true --overwrite
+```
+
+For k3s, the control-plane node usually provides a command similar to:
+
+```powershell
+curl -sfL https://get.k3s.io | K3S_URL=https://<server>:6443 K3S_TOKEN=<token> sh -
+```
+
+## Turning a PC Worker Off for Gaming
+
+```powershell
+.\scripts\k8s-worker-mode.ps1 -Node gaming-pc-5080 -Mode off
+```
+
+That command:
+
+- Confirms the node is optional.
+- Cordons the node.
+- Applies `local-llm.io/gaming=true:NoExecute`.
+- Deletes interruptible Local LLM pods from that node so GPU/CPU resources are freed.
+
+Bring it back:
+
+```powershell
+.\scripts\k8s-worker-mode.ps1 -Node gaming-pc-5080 -Mode on
+```
+
+That command removes the gaming taint, uncordons the node, and lets the Ollama DaemonSet recreate the pod.
+
+## LLM Routing
+
+The backend reads `OLLAMA_BACKENDS_FILE` or `OLLAMA_BACKENDS`. The Kubernetes config map in `k8s/local-llm/ollama-backends-configmap.yaml` shows the expected shape.
+
+For example, prioritize the RTX 5080 machine for large models:
+
+```json
+{
+  "model_preferences": {
+    "gemma2:27b": ["gaming-pc-5080"],
+    "qwen2.5:14b": ["gaming-pc-5080"],
+    "llama3.2:3b": ["mac-mini", "gaming-pc-5080"]
+  }
+}
+```
+
+When a preferred PC is off, NotReady, cordoned, or has Ollama stopped, the backend health probe marks it unavailable and routes to the next viable backend without requiring a frontend change.
+
+## Frontend Behavior
+
+Users still select the model in the UI. The backend decides which worker should serve that model for the current request. The UI does not need to know which machine was used.
+
+For inspection:
+
+```powershell
+curl http://localhost/routing/status
+```

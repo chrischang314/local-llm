@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-llm-backend
+  namespace: local-llm
+  labels:
+    app.kubernetes.io/name: local-llm
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: local-llm
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: local-llm
+        app.kubernetes.io/component: backend
+    spec:
+      containers:
+        - name: backend
+          image: local-llm-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: OLLAMA_BACKENDS_FILE
+              value: /app/config/backends.json
+          volumeMounts:
+            - name: ollama-backends
+              mountPath: /app/config
+              readOnly: true
+            - name: chat-data
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /routing/status
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: ollama-backends
+          configMap:
+            name: ollama-backends
+        - name: chat-data
+          persistentVolumeClaim:
+            claimName: local-llm-chat-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-llm-chat-data
+  namespace: local-llm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-llm-backend
+  namespace: local-llm
+spec:
+  selector:
+    app.kubernetes.io/name: local-llm
+    app.kubernetes.io/component: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

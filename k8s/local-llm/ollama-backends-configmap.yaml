@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ollama-backends
+  namespace: local-llm
+data:
+  backends.json: |
+    {
+      "backends": [
+        {
+          "name": "gaming-pc-5080",
+          "url": "http://gaming-pc-5080.lan:11434",
+          "priority": 10,
+          "weight": 4,
+          "enabled": true,
+          "essential": false,
+          "models": ["gemma2:27b", "qwen2.5:14b", "llama3.1:8b", "llama3.2:3b"],
+          "labels": {
+            "gpu": "nvidia",
+            "tier": "large",
+            "optional": "true"
+          }
+        },
+        {
+          "name": "spare-pc",
+          "url": "http://spare-pc.lan:11434",
+          "priority": 30,
+          "weight": 2,
+          "enabled": true,
+          "essential": false,
+          "models": ["llama3.1:8b", "llama3.2:3b"],
+          "labels": {
+            "tier": "medium",
+            "optional": "true"
+          }
+        },
+        {
+          "name": "mac-mini",
+          "url": "http://mac-mini.lan:11434",
+          "priority": 60,
+          "weight": 1,
+          "enabled": true,
+          "essential": true,
+          "models": ["llama3.2:3b"],
+          "labels": {
+            "tier": "small",
+            "optional": "false"
+          }
+        }
+      ],
+      "model_preferences": {
+        "gemma2:27b": ["gaming-pc-5080"],
+        "qwen2.5:14b": ["gaming-pc-5080"],
+        "llama3.1:8b": ["gaming-pc-5080", "spare-pc"],
+        "llama3.2:3b": ["mac-mini", "spare-pc", "gaming-pc-5080"]
+      }
+    }

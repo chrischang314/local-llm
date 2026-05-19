@@ -4,3 +4,4 @@ __pycache__/
 .env
 ollama_data/
 data/
+.claude/
