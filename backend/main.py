@@ -58,6 +58,11 @@ from models import User
 from ollama_router import ollama_router
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+K8S_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE")
+K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+K8S_NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+WORKER_SWITCH_LABEL = "app.kubernetes.io/component=external-worker-switch"
 
 
 @asynccontextmanager
@@ -136,6 +141,10 @@ class ConversationUpdate(BaseModel):
 
 class ModelPullRequest(BaseModel):
     name: str
+
+
+class WorkerToggleRequest(BaseModel):
+    enabled: bool
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +402,173 @@ async def list_models(_: dict = Depends(current_user)):
 @app.get("/routing/status")
 async def routing_status(_: dict = Depends(current_user)):
     return await ollama_router.status()
+
+
+def _k8s_namespace() -> str:
+    if K8S_NAMESPACE:
+        return K8S_NAMESPACE
+    try:
+        return pathlib.Path(K8S_NAMESPACE_PATH).read_text(encoding="utf-8").strip()
+    except OSError:
+        return "local-llm"
+
+
+def _k8s_base_url() -> str:
+    host = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+    port = os.getenv("KUBERNETES_SERVICE_PORT", "443")
+    return f"https://{host}:{port}"
+
+
+async def _k8s_request(
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+    content_type: str = "application/json",
+) -> dict:
+    if not os.path.exists(K8S_TOKEN_PATH):
+        raise RuntimeError("Kubernetes service account token is unavailable")
+
+    token = pathlib.Path(K8S_TOKEN_PATH).read_text(encoding="utf-8").strip()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": content_type,
+    }
+    verify: str | bool = K8S_CA_PATH if os.path.exists(K8S_CA_PATH) else True
+    async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
+        response = await client.request(
+            method,
+            f"{_k8s_base_url()}{path}",
+            params=params,
+            headers=headers,
+            json=body,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def _list_worker_switches() -> list[dict]:
+    namespace = _k8s_namespace()
+    payload = await _k8s_request(
+        "GET",
+        f"/apis/apps/v1/namespaces/{namespace}/deployments",
+        params={"labelSelector": WORKER_SWITCH_LABEL},
+    )
+    return payload.get("items", [])
+
+
+def _serialize_worker_switch(deployment: dict) -> dict:
+    metadata = deployment.get("metadata", {})
+    labels = metadata.get("labels", {})
+    annotations = metadata.get("annotations", {})
+    spec = deployment.get("spec", {})
+    status = deployment.get("status", {})
+    replicas = int(spec.get("replicas") or 0)
+    return {
+        "worker": labels.get("local-llm.io/worker") or metadata.get("name"),
+        "deployment": metadata.get("name"),
+        "namespace": metadata.get("namespace"),
+        "desired_replicas": replicas,
+        "ready_replicas": int(status.get("readyReplicas") or 0),
+        "desired_state": annotations.get("local-llm.io/desired-state") or ("on" if replicas > 0 else "off"),
+        "actual_state": annotations.get("local-llm.io/actual-state") or "unknown",
+        "last_observed_at": annotations.get("local-llm.io/last-observed-at"),
+    }
+
+
+async def _worker_switch_by_name(worker_name: str) -> dict | None:
+    for deployment in await _list_worker_switches():
+        switch = _serialize_worker_switch(deployment)
+        if switch["worker"] == worker_name:
+            return switch
+    return None
+
+
+@app.get("/workers")
+async def list_workers(_: dict = Depends(current_user)):
+    routing = await ollama_router.status()
+    backend_by_name = {backend["name"]: backend for backend in routing.get("backends", [])}
+    switch_by_worker: dict[str, dict] = {}
+    control_error = None
+
+    try:
+        switch_by_worker = {
+            switch["worker"]: switch
+            for switch in (_serialize_worker_switch(item) for item in await _list_worker_switches())
+        }
+    except (RuntimeError, httpx.HTTPError) as exc:
+        control_error = str(exc)
+
+    ordered_names = list(dict.fromkeys([*switch_by_worker.keys(), *backend_by_name.keys()]))
+    workers = []
+    for name in ordered_names:
+        backend = backend_by_name.get(name, {})
+        switch = switch_by_worker.get(name)
+        enabled = switch["desired_replicas"] > 0 if switch else bool(backend.get("enabled", False))
+        workers.append({
+            "name": name,
+            "url": backend.get("url"),
+            "available": bool(backend.get("available", False)),
+            "enabled": enabled,
+            "essential": bool(backend.get("essential", False)),
+            "configured_models": backend.get("configured_models", []),
+            "available_models": backend.get("available_models", []),
+            "in_flight": backend.get("in_flight", 0),
+            "labels": backend.get("labels", {}),
+            "error": backend.get("error"),
+            "controllable": switch is not None and control_error is None,
+            "control": switch,
+        })
+
+    return {
+        "workers": workers,
+        "control_available": control_error is None,
+        "control_error": control_error,
+    }
+
+
+@app.patch("/workers/{worker_name}")
+async def set_worker_state(
+    worker_name: str,
+    body: WorkerToggleRequest,
+    _: dict = Depends(current_user),
+):
+    try:
+        switch = await _worker_switch_by_name(worker_name)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=f"Kubernetes API error: {exc.response.text}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unavailable: {exc}") from exc
+
+    if not switch:
+        raise HTTPException(status_code=404, detail=f"No Kubernetes worker switch found for {worker_name}")
+
+    replicas = 1 if body.enabled else 0
+    namespace = switch["namespace"] or _k8s_namespace()
+    deployment = switch["deployment"]
+    try:
+        await _k8s_request(
+            "PATCH",
+            f"/apis/apps/v1/namespaces/{namespace}/deployments/{deployment}/scale",
+            body={"spec": {"replicas": replicas}},
+            content_type="application/merge-patch+json",
+        )
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=f"Kubernetes API error: {exc.response.text}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail=f"Kubernetes API unavailable: {exc}") from exc
+
+    return {"ok": True, "name": worker_name, "enabled": body.enabled, "replicas": replicas}
 
 
 @app.post("/models/pull")

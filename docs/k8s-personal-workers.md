@@ -97,6 +97,8 @@ kubectl -n local-llm get deploy chris-pc-2-ollama-switch
 kubectl -n local-llm describe deploy chris-pc-2-ollama-switch
 ```
 
+The Local LLM settings panel also lists optional workers under **Workers**. That panel uses the same switch Deployment, so turning `CHRIS-PC-2` on or off there is equivalent to scaling `chris-pc-2-ollama-switch` in the Kubernetes dashboard.
+
 ## Join a PC to the Cluster
 
 Use the join command from your cluster control plane. For kubeadm clusters it usually looks like:

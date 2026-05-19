@@ -860,7 +860,8 @@ svg {
 .edit-actions button,
 .code-copy-btn,
 #pull-model-btn,
-.model-list button {
+.model-list button,
+.worker-list button {
   min-height: 30px;
   padding: 0 10px;
   color: var(--muted-strong);
@@ -875,7 +876,8 @@ svg {
 .edit-actions button:hover,
 .code-copy-btn:hover,
 #pull-model-btn:hover,
-.model-list button:hover {
+.model-list button:hover,
+.worker-list button:hover {
   color: var(--ink);
   border-color: var(--line-strong);
 }
@@ -1091,12 +1093,14 @@ svg {
   font-size: 0.86rem;
 }
 
-.model-list {
+.model-list,
+.worker-list {
   display: grid;
   gap: 8px;
 }
 
-.model-list .row {
+.model-list .row,
+.worker-list .row {
   min-height: 42px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1108,7 +1112,8 @@ svg {
   border-radius: 8px;
 }
 
-.model-list .name {
+.model-list .name,
+.worker-list .name {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -1121,6 +1126,45 @@ svg {
   color: var(--muted);
   font-size: 0.82rem;
   white-space: nowrap;
+}
+
+.worker-info {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.worker-details,
+.worker-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-note {
+  padding: 8px 10px;
+  color: var(--warning);
+  background: #fff7e6;
+  border: 1px solid #ffe2aa;
+  border-radius: 8px;
+}
+
+.worker-state {
+  color: var(--warning);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.worker-state.available {
+  color: var(--accent);
+}
+
+.worker-state.unavailable {
+  color: var(--danger);
 }
 
 .pull-row {

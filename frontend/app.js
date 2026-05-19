@@ -76,6 +76,7 @@ const settingsTopP = $("settings-top-p");
 const settingsTopPVal = $("settings-top-p-val");
 const settingsTopK = $("settings-top-k");
 const modelListEl = $("model-list");
+const workerListEl = $("worker-list");
 const pullModelInput = $("pull-model-name");
 const pullModelBtn = $("pull-model-btn");
 const pullProgress = $("pull-progress");
@@ -774,7 +775,7 @@ async function openSettings() {
   settingsTopK.value = c.top_k ?? 40;
   updateSliderLabels();
   // If no conversation yet, settings live only in-memory until first message.
-  await refreshModelList();
+  await Promise.all([refreshModelList(), refreshWorkerList()]);
   settingsModal.classList.remove("hidden");
 }
 
@@ -855,6 +856,81 @@ async function refreshModelList() {
     }
   } catch (err) {
     modelListEl.textContent = `Failed to load models: ${err.message}`;
+  }
+}
+
+async function refreshWorkerList() {
+  workerListEl.textContent = "Loading...";
+  try {
+    const data = await apiJson("/workers");
+    const workers = data.workers ?? [];
+    if (!workers.length) {
+      workerListEl.textContent = "No workers configured.";
+      return;
+    }
+
+    workerListEl.innerHTML = "";
+    if (!data.control_available && data.control_error) {
+      const note = document.createElement("div");
+      note.className = "worker-note";
+      note.textContent = `Control unavailable: ${data.control_error}`;
+      workerListEl.appendChild(note);
+    }
+
+    for (const worker of workers) {
+      const row = document.createElement("div");
+      row.className = "row worker-row";
+
+      const info = document.createElement("div");
+      info.className = "worker-info";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = worker.name;
+      const details = document.createElement("span");
+      details.className = "worker-details";
+      details.textContent = workerSummary(worker);
+      info.append(name, details);
+
+      const state = document.createElement("span");
+      state.className = `worker-state ${worker.available ? "available" : "unavailable"}`;
+      state.textContent = worker.available ? "available" : "unavailable";
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = worker.enabled ? "Turn off" : "Turn on";
+      toggle.disabled = !worker.controllable || worker.essential;
+      toggle.onclick = () => setWorkerState(worker.name, !worker.enabled, toggle);
+
+      row.append(info, state, toggle);
+      workerListEl.appendChild(row);
+    }
+  } catch (err) {
+    workerListEl.textContent = `Failed to load workers: ${err.message}`;
+  }
+}
+
+function workerSummary(worker) {
+  const actual = worker.control?.actual_state || (worker.enabled ? "on" : "off");
+  const desired = worker.control?.desired_state || (worker.enabled ? "on" : "off");
+  const models = worker.available_models?.length
+    ? worker.available_models.join(", ")
+    : worker.configured_models?.join(", ") || "no models";
+  const active = worker.in_flight ? `${worker.in_flight} active` : "idle";
+  return `${actual}/${desired} - ${active} - ${models}`;
+}
+
+async function setWorkerState(name, enabled, button) {
+  button.disabled = true;
+  button.textContent = enabled ? "Turning on..." : "Turning off...";
+  try {
+    await apiJson(`/workers/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await Promise.all([refreshWorkerList(), refreshHealth(), loadModels()]);
+  } catch (err) {
+    alert(`Worker update failed: ${err.message}`);
+    await refreshWorkerList();
   }
 }
 
