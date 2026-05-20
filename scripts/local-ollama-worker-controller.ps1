@@ -5,6 +5,8 @@ param(
     [string]$ComposeFile = "docker-compose.pc-worker.yml",
     [string]$Service = "chris-pc-2-ollama",
     [string]$Container = "local-llm-chris-pc-2-ollama",
+    [string]$Volume = "local_llm_chris_pc_2_ollama",
+    [string]$DockerConfig = ".docker-worker",
     [int]$PollSeconds = 10,
     [switch]$Once
 )
@@ -60,7 +62,7 @@ function Set-WorkerStatusAnnotation {
 }
 
 function Start-Worker {
-    docker volume create local_llm_chris_pc_2_ollama | Out-Null
+    docker volume create $Volume | Out-Null
     docker compose -f $ComposeFile up -d $Service | Out-Host
 }
 
@@ -100,6 +102,19 @@ function Sync-Worker {
 
 $repoRoot = Get-ScriptRoot
 Set-Location $repoRoot
+if ($DockerConfig) {
+    $resolvedDockerConfig = $DockerConfig
+    if (-not [System.IO.Path]::IsPathRooted($resolvedDockerConfig)) {
+        $resolvedDockerConfig = Join-Path $repoRoot $resolvedDockerConfig
+    }
+
+    New-Item -ItemType Directory -Path $resolvedDockerConfig -Force | Out-Null
+    $dockerConfigJson = Join-Path $resolvedDockerConfig "config.json"
+    if (-not (Test-Path $dockerConfigJson)) {
+        Set-Content -Path $dockerConfigJson -Value "{}" -Encoding ascii
+    }
+    $env:DOCKER_CONFIG = $resolvedDockerConfig
+}
 $script:LastStatusKey = $null
 $script:LastAnnotationAt = [datetime]::MinValue
 

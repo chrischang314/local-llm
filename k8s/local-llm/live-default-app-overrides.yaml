@@ -53,19 +53,46 @@ data:
             "tier": "large",
             "pool": "external"
           }
+        },
+        {
+          "name": "chris-pc-1",
+          "url": "http://192.168.4.27:11434",
+          "priority": 15,
+          "weight": 2,
+          "enabled": true,
+          "essential": false,
+          "models": [
+            "llama3.2:1b",
+            "llama3.2:3b",
+            "qwen2.5:3b",
+            "phi3:mini",
+            "gemma3:4b",
+            "mistral:7b",
+            "llama3.1:8b",
+            "qwen2.5:7b",
+            "qwen2.5-coder:7b",
+            "deepseek-r1:7b"
+          ],
+          "labels": {
+            "host": "CHRIS-PC-1",
+            "gpu": "RTX 4060",
+            "vram": "8GB",
+            "tier": "medium",
+            "pool": "external"
+          }
         }
       ],
       "model_preferences": {
-        "llama3.2:1b": ["mac-mini", "chris-pc-2"],
-        "llama3.2:3b": ["chris-pc-2", "mac-mini"],
-        "qwen2.5:3b": ["mac-mini", "chris-pc-2"],
-        "phi3:mini": ["mac-mini", "chris-pc-2"],
-        "gemma3:4b": ["chris-pc-2"],
-        "mistral:7b": ["chris-pc-2"],
-        "llama3.1:8b": ["chris-pc-2"],
-        "qwen2.5:7b": ["chris-pc-2"],
-        "qwen2.5-coder:7b": ["chris-pc-2"],
-        "deepseek-r1:7b": ["chris-pc-2"]
+        "llama3.2:1b": ["mac-mini", "chris-pc-2", "chris-pc-1"],
+        "llama3.2:3b": ["chris-pc-2", "chris-pc-1", "mac-mini"],
+        "qwen2.5:3b": ["mac-mini", "chris-pc-2", "chris-pc-1"],
+        "phi3:mini": ["mac-mini", "chris-pc-2", "chris-pc-1"],
+        "gemma3:4b": ["chris-pc-2", "chris-pc-1"],
+        "mistral:7b": ["chris-pc-2", "chris-pc-1"],
+        "llama3.1:8b": ["chris-pc-2", "chris-pc-1"],
+        "qwen2.5:7b": ["chris-pc-2", "chris-pc-1"],
+        "qwen2.5-coder:7b": ["chris-pc-2", "chris-pc-1"],
+        "deepseek-r1:7b": ["chris-pc-2", "chris-pc-1"]
       }
     }
 ---

@@ -62,12 +62,65 @@ powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 
 
 The backend config map lists `chris-pc-2` first for `llama3.2:3b`, `llama3.1:8b`, and `qwen2.5:14b`. The router still confirms the model is actually installed before choosing the PC.
 
-## Dashboard On/Off Control
+## CHRIS-PC-1 Optional Worker
 
-`CHRIS-PC-2` also has a Kubernetes dashboard switch:
+`CHRIS-PC-1` is integrated using the same external optional Ollama worker pattern.
+
+Current endpoint:
+
+```text
+http://192.168.4.27:11434
+```
+
+Hardware detected:
+
+```text
+NVIDIA GeForce RTX 4060, 8 GB VRAM
+```
+
+Dashboard switch:
 
 ```text
 namespace: local-llm
+deployment: chris-pc-1-ollama-switch
+```
+
+The backend config lists `chris-pc-1` after `chris-pc-2` for larger external
+models, and after the Mac Mini / `chris-pc-2` for smaller fallback-capable
+models. The router still checks whether the PC is on and whether a model is
+installed before routing traffic there.
+
+Installed model baseline:
+
+```text
+llama3.2:3b
+```
+
+Install or refresh the CHRIS-PC-1 watcher:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-local-ollama-worker-controller.ps1 `
+  -TaskName "Local LLM CHRIS-PC-1 Worker Controller" `
+  -WorkerName chris-pc-1 `
+  -SwitchDeployment chris-pc-1-ollama-switch `
+  -Service chris-pc-1-ollama `
+  -Container local-llm-chris-pc-1-ollama `
+  -Volume local_llm_chris_pc_1_ollama `
+  -InstallDockerDesktopStartupTask
+```
+
+The installer registers interactive logon tasks so Docker Desktop and the
+worker controller run in the active Windows user session. This avoids Docker
+Desktop credential-helper and named-pipe issues that appear in plain SSH
+sessions.
+
+## Dashboard On/Off Control
+
+Each external Windows worker has a Kubernetes dashboard switch:
+
+```text
+namespace: local-llm
+deployment: chris-pc-1-ollama-switch
 deployment: chris-pc-2-ollama-switch
 ```
 
@@ -76,7 +129,7 @@ Scale that deployment from the Kubernetes dashboard:
 - `replicas: 1` turns the local PC worker on.
 - `replicas: 0` turns the local PC worker off.
 
-The switch pod is intentionally tiny and does not run the model. It gives the Kubernetes control panel a normal Deployment object to scale. A watcher on `CHRIS-PC-2` observes that desired replica count and starts or stops the local Docker Ollama container.
+The switch pod is intentionally tiny and does not run the model. It gives the Kubernetes control panel a normal Deployment object to scale. A watcher on each Windows PC observes that desired replica count and starts or stops the local Docker Ollama container.
 
 Install the watcher on `CHRIS-PC-2`:
 
@@ -97,7 +150,7 @@ kubectl -n local-llm get deploy chris-pc-2-ollama-switch
 kubectl -n local-llm describe deploy chris-pc-2-ollama-switch
 ```
 
-The Local LLM settings panel also lists optional workers under **Workers**. That panel uses the same switch Deployment, so turning `CHRIS-PC-2` on or off there is equivalent to scaling `chris-pc-2-ollama-switch` in the Kubernetes dashboard.
+The Local LLM settings panel also lists optional workers under **Workers**. That panel uses the same switch Deployments, so turning a PC on or off there is equivalent to scaling that worker's switch Deployment in the Kubernetes dashboard.
 
 If the live Local LLM app is the Helm-managed deployment in the `default` namespace, also apply the live app overrides after image updates:
 
@@ -105,7 +158,7 @@ If the live Local LLM app is the Helm-managed deployment in the `default` namesp
 .\scripts\deploy-live-default-app-overrides.ps1
 ```
 
-Those overrides give the live backend permission to read and scale the `local-llm` worker switch, and they load the same `mac-mini`/`chris-pc-2` routing configuration that the settings panel displays.
+Those overrides give the live backend permission to read and scale the `local-llm` worker switches, and they load the same `mac-mini`/`chris-pc-2`/`chris-pc-1` routing configuration that the settings panel displays.
 
 ## Model Storage and Residency
 
