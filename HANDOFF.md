@@ -9,6 +9,9 @@
   model count plus worker availability.
 - `chris-pc-1-ollama-switch` lives in the `local-llm` namespace and is currently
   the Kubernetes on/off switch for that PC.
+- Login tokens are stored in browser `localStorage`. The backend signs them
+  with `JWT_SECRET` when set, otherwise it generates and reuses
+  `/app/data/jwt_secret` on the persistent chat-data volume.
 - The CHRIS-PC-1 controller runs as the Windows scheduled task
   `Local LLM CHRIS-PC-1 Worker Controller`.
 - Docker Desktop is started at logon by the `Start Docker Desktop` scheduled
@@ -20,7 +23,11 @@
 ## Safe Continuation Notes
 
 - Do not commit kubeconfigs, service-account tokens, SSH keys, Docker auth
-  files, or anything under `.docker-worker/`.
+  files, anything under `.docker-worker/`, or any generated `data/jwt_secret`
+  file.
+- If an existing browser token was signed before this persistence change, the
+  user may need to sign in once after deployment. New tokens should survive tab
+  closes and backend restarts until logout or token expiry.
 - If CHRIS-PC-1 appears offline, first check Docker Desktop and the scheduled
   tasks on that PC, then check the switch annotations:
 

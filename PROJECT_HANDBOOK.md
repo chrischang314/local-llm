@@ -44,6 +44,15 @@ and a compact worker summary derived from the router's backend health cache.
 The frontend sidebar uses that same response to show `available/enabled`
 workers and active routed requests.
 
+## Authentication
+
+The app uses simple username/password login for a trusted LAN. The browser keeps
+the bearer token in `localStorage` so the user remains signed in across tab
+closes. The backend signs tokens with `JWT_SECRET` when configured; otherwise it
+stores a generated signing key under the persistent app data directory
+(`/app/data/jwt_secret` in containers). That generated key is runtime state and
+must stay out of git.
+
 ## Operational Safety
 
 Secrets and local runtime state stay out of git. In particular, do not commit

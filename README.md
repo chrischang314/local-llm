@@ -47,3 +47,15 @@ worker summary:
 
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and available worker capacity.
+
+## Login Persistence
+
+The browser stores the active login token in `localStorage`, so closing and
+reopening a tab should keep the user signed in until they click log out or the
+30-day token expires.
+
+Backend restarts keep accepting existing tokens because the JWT signing key is
+persisted at `/app/data/jwt_secret` by default. `JWT_SECRET` still takes
+priority when set, and `JWT_SECRET_FILE` can point the generated key somewhere
+else. Do not delete the chat data volume if you want existing sessions to stay
+valid across redeploys.

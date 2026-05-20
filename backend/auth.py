@@ -1,12 +1,14 @@
 """Password hashing and JWT helpers.
 
 We use bcrypt for password hashing and JWT (HS256) for bearer tokens.
-The signing key comes from the JWT_SECRET env var; if unset, a random key
-is generated at startup (which invalidates tokens across restarts — fine
-for dev, set the env var in production).
+The signing key comes from the JWT_SECRET env var when provided. Otherwise,
+we create one once under the persistent app data directory so browser logins
+survive backend restarts.
 """
 
+import logging
 import os
+import pathlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -14,7 +16,57 @@ import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Header
 
-JWT_SECRET = os.getenv("JWT_SECRET") or secrets.token_urlsafe(32)
+LOGGER = logging.getLogger(__name__)
+
+
+def _load_jwt_secret() -> str:
+    configured_secret = os.getenv("JWT_SECRET")
+    if configured_secret:
+        return configured_secret
+
+    secret_path = pathlib.Path(
+        os.getenv(
+            "JWT_SECRET_FILE",
+            str(pathlib.Path(os.getenv("LOCAL_LLM_DATA_DIR", "data")) / "jwt_secret"),
+        )
+    )
+
+    try:
+        persisted_secret = secret_path.read_text(encoding="utf-8").strip()
+        if persisted_secret:
+            return persisted_secret
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        LOGGER.warning("Could not read JWT secret file %s: %s", secret_path, exc)
+
+    generated_secret = secrets.token_urlsafe(48)
+    try:
+        secret_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with secret_path.open("x", encoding="utf-8") as handle:
+                handle.write(generated_secret + "\n")
+            try:
+                secret_path.chmod(0o600)
+            except OSError:
+                pass
+            return generated_secret
+        except FileExistsError:
+            persisted_secret = secret_path.read_text(encoding="utf-8").strip()
+            if persisted_secret:
+                return persisted_secret
+            secret_path.write_text(generated_secret + "\n", encoding="utf-8")
+            return generated_secret
+    except OSError as exc:
+        LOGGER.warning(
+            "Could not persist JWT secret at %s; falling back to an ephemeral key: %s",
+            secret_path,
+            exc,
+        )
+        return generated_secret
+
+
+JWT_SECRET = _load_jwt_secret()
 JWT_ALGORITHM = "HS256"
 TOKEN_TTL_DAYS = 30
 
