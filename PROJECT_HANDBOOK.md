@@ -36,6 +36,14 @@ The router should only choose a backend that is enabled, reachable, and has the
 requested model installed. Optional PC workers should appear after essential
 capacity for small models unless a larger GPU is intentionally preferred.
 
+## Health Reporting
+
+The unauthenticated `/health` route is intentionally lightweight enough for
+dashboards and launchpad checks. It reports backend status, Ollama model count,
+and a compact worker summary derived from the router's backend health cache.
+The frontend sidebar uses that same response to show `available/enabled`
+workers and active routed requests.
+
 ## Operational Safety
 
 Secrets and local runtime state stay out of git. In particular, do not commit

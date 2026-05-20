@@ -221,14 +221,46 @@ async def health():
     """
     ollama_status = "down"
     model_count = 0
+    workers = {
+        "total": 0,
+        "enabled": 0,
+        "available": 0,
+        "busy": 0,
+        "loaded_model_count": 0,
+    }
     try:
         models = await ollama_router.list_models()
         model_count = len(models.get("models", []))
+        workers = _health_worker_summary(models)
         if model_count:
             ollama_status = "ok"
     except Exception:
         pass
-    return {"backend": "ok", "ollama": ollama_status, "model_count": model_count}
+    return {
+        "backend": "ok",
+        "ollama": ollama_status,
+        "model_count": model_count,
+        "workers": workers,
+    }
+
+
+def _health_worker_summary(models_payload: dict) -> dict:
+    """Build a compact worker summary from the router's public backend status."""
+    backends = models_payload.get("backends", []) or []
+    enabled = [backend for backend in backends if backend.get("enabled")]
+    available = [backend for backend in enabled if backend.get("available")]
+    busy = sum(int(backend.get("in_flight") or 0) for backend in backends)
+    loaded_model_count = sum(
+        len(backend.get("loaded_models") or [])
+        for backend in backends
+    )
+    return {
+        "total": len(backends),
+        "enabled": len(enabled),
+        "available": len(available),
+        "busy": busy,
+        "loaded_model_count": loaded_model_count,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -209,16 +209,35 @@ async function refreshHealth() {
     const res = await fetch(`${API}/health`);
     const data = await res.json();
     const ok = data.ollama === "ok";
+    const modelCount = data.model_count || 0;
+    const modelWord = modelCount === 1 ? "model" : "models";
+    const workerText = formatHealthWorkers(data.workers);
+    const label = ok
+      ? `Ollama ready - ${modelCount} ${modelWord}${workerText}`
+      : `Ollama unreachable${workerText}`;
     healthIndicator.classList.toggle("ok", ok);
     healthIndicator.classList.toggle("down", !ok);
-    healthIndicator.querySelector(".label").textContent = ok
-      ? `Ollama ready · ${data.model_count} model${data.model_count === 1 ? "" : "s"}`
-      : "Ollama unreachable";
+    healthIndicator.querySelector(".label").textContent = label;
+    healthIndicator.title = label;
   } catch {
     healthIndicator.classList.remove("ok");
     healthIndicator.classList.add("down");
     healthIndicator.querySelector(".label").textContent = "Backend unreachable";
+    healthIndicator.title = "Backend unreachable";
   }
+}
+
+function formatHealthWorkers(workers) {
+  if (!workers || !Number.isFinite(workers.enabled)) return "";
+  if (workers.enabled < 1) return " - no workers enabled";
+
+  const available = Number.isFinite(workers.available) ? workers.available : 0;
+  const workerWord = workers.enabled === 1 ? "worker" : "workers";
+  const busy =
+    Number.isFinite(workers.busy) && workers.busy > 0
+      ? ` - ${workers.busy} active`
+      : "";
+  return ` - ${available}/${workers.enabled} ${workerWord}${busy}`;
 }
 
 /* ---------- Models ---------- */

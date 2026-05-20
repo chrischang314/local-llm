@@ -34,3 +34,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-controlle
 
 The worker scripts use `.docker-worker/config.json` for unattended Docker calls.
 That directory is intentionally ignored by git.
+
+## Health Status
+
+`GET /health` returns the backend state, Ollama model count, and a compact
+worker summary:
+
+- `workers.enabled`: configured workers that are allowed to receive traffic.
+- `workers.available`: enabled workers that answered their Ollama health check.
+- `workers.busy`: requests currently routed through workers.
+- `workers.loaded_model_count`: resident models across all configured workers.
+
+The chat sidebar uses the same endpoint so the at-a-glance status shows both
+model count and available worker capacity.
