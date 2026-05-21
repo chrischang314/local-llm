@@ -62,11 +62,11 @@ const toggleMode = $("toggle-mode");
 const sidebarUsername = $("sidebar-username");
 const logoutBtn = $("logout-btn");
 const newChatBtn = $("new-chat-btn");
-const codeJobsBtn = $("code-jobs-btn");
 const settingsBtn = $("settings-btn");
 const conversationsList = $("conversations-list");
 const chatWorkspace = $("chat-workspace");
 const codeJobsView = $("code-jobs-view");
+const workspaceModeButtons = document.querySelectorAll("[data-workspace-mode]");
 const messagesEl = $("messages");
 const inputEl = $("input");
 const sendBtn = $("send-btn");
@@ -334,6 +334,29 @@ function renderAgentStatus() {
   agentStatusPill.title = `${agentStatus.executor_mode || "kubernetes"} - ${agentStatus.push_policy || "direct-main-after-tests"}${missing}`;
 }
 
+function getAgentDisabledReason() {
+  if (!agentStatus) return "Checking agent runtime status...";
+  const missing = agentStatus.missing || [];
+  if (agentStatus.error) return `Agent API unavailable: ${agentStatus.error}`;
+  if (missing.some((name) => name.startsWith("GITHUB_APP_") || name === "GITHUB_ALLOWED_INSTALLATION_IDS")) {
+    return "GitHub App setup is required before code changes can run.";
+  }
+  if (missing.includes("AGENT_SECRET_KEY")) {
+    return "Agent signing secret is missing from the backend deployment.";
+  }
+  if (missing.includes("AGENT_JOBS_ENABLED")) {
+    return "Agent jobs are disabled until sandbox canaries pass.";
+  }
+  if (missing.length) return `Missing backend config: ${missing.join(", ")}`;
+  return "Agent jobs are disabled.";
+}
+
+function getGithubSetupMessage() {
+  const missing = githubStatus?.missing || [];
+  if (!missing.length) return "GitHub App backend settings are missing.";
+  return `GitHub App backend settings are missing: ${missing.join(", ")}. Add them as Kubernetes secrets/env vars, then restart the backend.`;
+}
+
 async function refreshGithubStatus() {
   if (!githubStatusText) return null;
   try {
@@ -361,12 +384,20 @@ function renderGithubStatus() {
   if (settingsGithubStatus) settingsGithubStatus.textContent = text;
   [githubConnectBtn, settingsGithubConnect].forEach((button) => {
     if (!button) return;
-    button.disabled = !configured;
-    button.querySelector("span").textContent = connected ? "Reconnect" : "Connect GitHub App";
+    button.disabled = false;
+    button.querySelector("span").textContent = connected
+      ? "Reconnect"
+      : configured
+        ? "Connect GitHub App"
+        : "Setup GitHub App";
   });
 }
 
 async function startGithubInstall() {
+  if (githubStatus && !githubStatus.configured) {
+    alert(getGithubSetupMessage());
+    return;
+  }
   try {
     const data = await apiJson("/github/install/start", { method: "POST" });
     if (!data.configured || !data.install_url) {
@@ -583,8 +614,9 @@ function updateRunButtonState() {
     !!agentModelSelect.value &&
     !!agentTaskInput.value.trim();
   runCodeJobBtn.disabled = !enabled;
-  if (!agentStatus?.enabled) codeJobFormStatus.textContent = "Agent jobs are disabled until sandbox canaries pass.";
-  else if (!githubStatus?.connected) codeJobFormStatus.textContent = "Connect GitHub first.";
+  if (!agentStatus?.enabled) codeJobFormStatus.textContent = getAgentDisabledReason();
+  else if (!githubStatus?.configured) codeJobFormStatus.textContent = getGithubSetupMessage();
+  else if (!githubStatus?.connected) codeJobFormStatus.textContent = "Connect the GitHub App before running code changes.";
   else codeJobFormStatus.textContent = "";
 }
 
@@ -848,8 +880,11 @@ newChatBtn.addEventListener("click", () => {
   inputEl.focus();
 });
 
-codeJobsBtn.addEventListener("click", () => {
-  showCodeJobsView();
+workspaceModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (button.dataset.workspaceMode === "code") showCodeJobsView();
+    else showChatView();
+  });
 });
 
 async function showChatView() {
@@ -857,16 +892,21 @@ async function showChatView() {
   chatWorkspace.classList.remove("hidden");
   codeJobsView.classList.add("hidden");
   newChatBtn.classList.add("active");
-  codeJobsBtn.classList.remove("active");
+  workspaceModeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.workspaceMode === "chat");
+  });
   stopAgentEventStream();
+  refreshIcons();
 }
 
 async function showCodeJobsView() {
-  activeView = "code-jobs";
+  activeView = "code";
   chatWorkspace.classList.add("hidden");
   codeJobsView.classList.remove("hidden");
   newChatBtn.classList.remove("active");
-  codeJobsBtn.classList.add("active");
+  workspaceModeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.workspaceMode === "code");
+  });
   await Promise.all([refreshAgentStatus(), refreshGithubStatus(), refreshAgentJobs()]);
   if (githubStatus?.connected && !repoSelect.value) await refreshRepos();
   refreshIcons();

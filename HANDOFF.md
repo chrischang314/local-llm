@@ -19,12 +19,13 @@
   Windows session.
 - `llama3.2:3b` is installed on CHRIS-PC-1 and was verified with a direct
   generate request from inside the Kubernetes backend pod.
-- A gated Code Jobs workspace now exists for GitHub App-backed code execution.
-  The backend exposes `/github/*` and `/agent/*`, nginx proxies both prefixes,
-  and the runner image lives in `agent-runner/`.
+- A gated Code mode now exists in the main workspace for GitHub App-backed code
+  execution. The backend exposes `/github/*` and `/agent/*`, nginx proxies both
+  prefixes, and the runner image lives in `agent-runner/`.
 - `AGENT_JOBS_ENABLED` should remain `false` until the live
   `local-llm-sandbox` NetworkPolicy and canary checks pass. The UI will show the
-  feature as disabled but still lets users inspect GitHub connection state.
+  feature as disabled but still lets users inspect GitHub connection state and
+  click the setup button to see the missing GitHub App settings.
 
 ## Safe Continuation Notes
 
@@ -95,3 +96,7 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
   This manifest blocks private/LAN ranges and permits public TCP 443 for GitHub
   operations. Treat public egress as a known residual risk until a domain-aware
   egress proxy is added.
+- Live UI smoke on 2026-05-21 verified `localllm.lan` exposes Code as a main
+  workspace mode, removes the old sidebar Code Jobs button, keeps GitHub setup
+  clickable when backend secrets are missing, and keeps Run Code Change disabled
+  until the GitHub App and sandbox gates are satisfied.

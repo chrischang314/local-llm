@@ -48,11 +48,13 @@ worker summary:
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and available worker capacity.
 
-## Code Jobs And GitHub App Integration
+## Code Change Mode And GitHub App Integration
 
-The app includes a gated Code Jobs workspace for authenticated users. It can
+The main workspace includes a gated Code mode for authenticated users. It can
 connect a GitHub App installation, list installed repositories and branches, and
-queue agentic coding jobs that run inside isolated Kubernetes Jobs.
+queue agentic coding jobs that run inside isolated Kubernetes Jobs. The GitHub
+button remains clickable when the backend is not configured so the UI can show
+which required settings are missing instead of presenting a dead disabled state.
 
 Live code execution is disabled by default. Enable it only after the sandbox
 namespace, NetworkPolicy enforcement, and canary tests pass:

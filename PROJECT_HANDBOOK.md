@@ -53,12 +53,13 @@ stores a generated signing key under the persistent app data directory
 (`/app/data/jwt_secret` in containers). That generated key is runtime state and
 must stay out of git.
 
-## Agentic Code Jobs
+## Agentic Code Mode
 
-Code Jobs are intentionally separate from chat. Chat remains a conversational UI
-over routed Ollama workers; Code Jobs are authenticated operational workflows
-that connect to GitHub through a GitHub App installation and execute inside a
-dedicated Kubernetes sandbox namespace.
+The main workspace has separate Chat and Code modes. Chat remains a
+conversational UI over routed Ollama workers; Code mode is an authenticated
+operational workflow that prompts a repository change, connects to GitHub
+through a GitHub App installation, and executes inside a dedicated Kubernetes
+sandbox namespace.
 
 The backend stores GitHub installation records, queued jobs, ordered steps, logs,
 and diff artifacts in SQLite. The frontend talks to `/github/*` for installation

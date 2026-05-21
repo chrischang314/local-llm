@@ -526,6 +526,42 @@ svg {
   gap: 10px;
 }
 
+.workspace-mode-switch {
+  flex: 0 0 auto;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  background: #e8eeeb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.mode-btn {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  color: var(--muted-strong);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.mode-btn:hover {
+  color: var(--ink);
+}
+
+.mode-btn.active {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 8px 18px rgba(31, 45, 39, 0.1);
+}
+
 .token-counter {
   flex: 0 0 auto;
   padding: 8px 10px;
@@ -1499,6 +1535,10 @@ svg {
   .header-controls {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .workspace-mode-switch {
+    width: 100%;
   }
 
   .status-pill {
