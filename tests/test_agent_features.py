@@ -48,6 +48,13 @@ class AgentServiceTests(unittest.TestCase):
 
 
 class KubernetesExecutorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_internal_backend_url_matches_cluster_service_name(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                agent_executor.internal_backend_url(),
+                "http://backend.default.svc.cluster.local:8000",
+            )
+
     async def test_launch_uses_restricted_job_manifest_and_secret_refs(self):
         calls = []
 
@@ -124,6 +131,12 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_runner_parses_reviewer_and_tester_decisions(self):
         runner = load_runner_module()
+
+        nested_action = runner.parse_action(
+            '```json\n{"action":"write_file","args":{"path":"calculator.py","content":"def subtract(a, b):\\n    return a - b\\n"}}\n```'
+        )
+        self.assertEqual(nested_action["action"], "write_file")
+        self.assertEqual(nested_action["args"]["path"], "calculator.py")
 
         approved = runner.parse_decision(
             '{"status":"approved","summary":"looks good","issues":[]}'

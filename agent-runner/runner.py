@@ -333,7 +333,7 @@ def diff() -> str:
 
 def extract_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S)
+    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, flags=re.S)
     if fence:
         text = fence.group(1)
     else:

@@ -36,7 +36,7 @@ def runner_image() -> str:
 def internal_backend_url() -> str:
     return os.getenv(
         "AGENT_INTERNAL_BACKEND_URL",
-        "http://local-llm-backend.default.svc.cluster.local:8000",
+        "http://backend.default.svc.cluster.local:8000",
     )
 
 

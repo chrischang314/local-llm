@@ -58,6 +58,8 @@
 - If an existing browser token was signed before this persistence change, the
   user may need to sign in once after deployment. New tokens should survive tab
   closes and backend restarts until logout or token expiry.
+- Agent runner callbacks use `http://backend.default.svc.cluster.local:8000` in
+  this cluster because the local-llm backend Service is named `backend`.
 - If CHRIS-PC-1 appears offline, first check Docker Desktop and the scheduled
   tasks on that PC, then check the switch annotations:
 
