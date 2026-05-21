@@ -39,6 +39,13 @@ let conversations = [];
 let isStreaming = false;
 let streamAbortController = null;
 let loginMode = "login"; // or "register"
+let activeView = "chat";
+let githubStatus = null;
+let agentStatus = null;
+let agentJobs = [];
+let selectedAgentJobId = null;
+let agentEventsAbort = null;
+let agentLogs = [];
 
 /* ---------- DOM refs ---------- */
 
@@ -55,8 +62,11 @@ const toggleMode = $("toggle-mode");
 const sidebarUsername = $("sidebar-username");
 const logoutBtn = $("logout-btn");
 const newChatBtn = $("new-chat-btn");
+const codeJobsBtn = $("code-jobs-btn");
 const settingsBtn = $("settings-btn");
 const conversationsList = $("conversations-list");
+const chatWorkspace = $("chat-workspace");
+const codeJobsView = $("code-jobs-view");
 const messagesEl = $("messages");
 const inputEl = $("input");
 const sendBtn = $("send-btn");
@@ -80,6 +90,35 @@ const workerListEl = $("worker-list");
 const pullModelInput = $("pull-model-name");
 const pullModelBtn = $("pull-model-btn");
 const pullProgress = $("pull-progress");
+const settingsGithubStatus = $("settings-github-status");
+const settingsGithubConnect = $("settings-github-connect");
+
+// Code Jobs
+const agentStatusPill = $("agent-status-pill");
+const refreshCodeJobsBtn = $("refresh-code-jobs-btn");
+const githubStatusText = $("github-status-text");
+const githubConnectBtn = $("github-connect-btn");
+const codeJobForm = $("code-job-form");
+const repoSearchInput = $("repo-search-input");
+const repoSearchBtn = $("repo-search-btn");
+const repoSelect = $("repo-select");
+const branchSelect = $("branch-select");
+const agentModelSelect = $("agent-model-select");
+const agentTaskInput = $("agent-task-input");
+const agentTestCommandInput = $("agent-test-command-input");
+const runCodeJobBtn = $("run-code-job-btn");
+const codeJobFormStatus = $("code-job-form-status");
+const agentJobListEl = $("agent-job-list");
+const agentJobTitle = $("agent-job-title");
+const agentJobSummary = $("agent-job-summary");
+const agentJobTimeline = $("agent-job-timeline");
+const agentJobLogs = $("agent-job-logs");
+const agentJobDiff = $("agent-job-diff");
+const cancelCodeJobBtn = $("cancel-code-job-btn");
+
+function refreshIcons() {
+  if (window.lucide) lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
+}
 
 /* ---------- HTTP helpers ---------- */
 
@@ -118,6 +157,7 @@ async function init() {
       const parsed = JSON.parse(stored);
       authToken = parsed.token;
       currentUser = { id: parsed.id, username: parsed.username };
+      await completeGithubInstallFromUrl();
       await loadApp();
       return;
     } catch {}
@@ -134,7 +174,13 @@ async function loadApp() {
   loginScreen.classList.add("hidden");
   appEl.classList.remove("hidden");
   sidebarUsername.textContent = currentUser.username;
-  await Promise.all([loadModels(), loadConversations(), refreshHealth()]);
+  await Promise.all([
+    loadModels(),
+    loadConversations(),
+    refreshHealth(),
+    refreshAgentStatus(),
+    refreshGithubStatus(),
+  ]);
   showEmptyState();
   // Refresh health every 15s so the indicator catches Ollama coming back online.
   setInterval(refreshHealth, 15000);
@@ -187,6 +233,7 @@ loginForm.addEventListener("submit", async (e) => {
 });
 
 function handleLogout() {
+  stopAgentEventStream();
   authToken = null;
   currentUser = null;
   currentConversation = null;
@@ -240,6 +287,377 @@ function formatHealthWorkers(workers) {
   return ` - ${available}/${workers.enabled} ${workerWord}${busy}`;
 }
 
+/* ---------- GitHub + Code Jobs ---------- */
+
+const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "canceled", "needs_review", "blocked"]);
+
+async function completeGithubInstallFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const installationId = params.get("installation_id");
+  const state = params.get("state");
+  if (!installationId || !state) return;
+  try {
+    await apiJson("/github/install/complete", {
+      method: "POST",
+      body: JSON.stringify({ installation_id: installationId, state }),
+    });
+  } catch (err) {
+    console.error("GitHub install completion failed:", err);
+  } finally {
+    params.delete("installation_id");
+    params.delete("setup_action");
+    params.delete("state");
+    const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, next);
+  }
+}
+
+async function refreshAgentStatus() {
+  if (!agentStatusPill) return null;
+  try {
+    agentStatus = await apiJson("/agent/status");
+  } catch (err) {
+    agentStatus = { enabled: false, missing: ["agent API unavailable"], error: err.message };
+  }
+  renderAgentStatus();
+  updateRunButtonState();
+  return agentStatus;
+}
+
+function renderAgentStatus() {
+  if (!agentStatusPill || !agentStatus) return;
+  const enabled = !!agentStatus.enabled;
+  agentStatusPill.textContent = enabled ? "agent jobs enabled" : "agent jobs disabled";
+  agentStatusPill.classList.toggle("warn", !enabled);
+  agentStatusPill.classList.toggle("danger", !!agentStatus.error);
+  const missing = agentStatus.missing?.length ? ` Missing: ${agentStatus.missing.join(", ")}` : "";
+  agentStatusPill.title = `${agentStatus.executor_mode || "kubernetes"} - ${agentStatus.push_policy || "direct-main-after-tests"}${missing}`;
+}
+
+async function refreshGithubStatus() {
+  if (!githubStatusText) return null;
+  try {
+    githubStatus = await apiJson("/github/status");
+  } catch (err) {
+    githubStatus = { configured: false, connected: false, missing: ["github API unavailable"], error: err.message };
+  }
+  renderGithubStatus();
+  updateRunButtonState();
+  return githubStatus;
+}
+
+function renderGithubStatus() {
+  const connected = !!githubStatus?.connected;
+  const configured = !!githubStatus?.configured;
+  const installation = githubStatus?.installation;
+  const missing = githubStatus?.missing?.length ? ` Missing: ${githubStatus.missing.join(", ")}` : "";
+  const text = connected
+    ? `Connected to ${installation?.account_login || "GitHub"}`
+    : configured
+      ? "GitHub App ready to connect"
+      : `GitHub App not configured.${missing}`;
+
+  if (githubStatusText) githubStatusText.textContent = text;
+  if (settingsGithubStatus) settingsGithubStatus.textContent = text;
+  [githubConnectBtn, settingsGithubConnect].forEach((button) => {
+    if (!button) return;
+    button.disabled = !configured;
+    button.querySelector("span").textContent = connected ? "Reconnect" : "Connect GitHub App";
+  });
+}
+
+async function startGithubInstall() {
+  try {
+    const data = await apiJson("/github/install/start", { method: "POST" });
+    if (!data.configured || !data.install_url) {
+      alert(`GitHub App is not configured: ${(data.missing || []).join(", ")}`);
+      return;
+    }
+    window.location.href = data.install_url;
+  } catch (err) {
+    alert(`GitHub connect failed: ${err.message}`);
+  }
+}
+
+async function refreshRepos() {
+  repoSelect.innerHTML = `<option value="">Loading repositories...</option>`;
+  branchSelect.innerHTML = `<option value="">Select a repo</option>`;
+  try {
+    const query = repoSearchInput.value.trim();
+    const data = await apiJson(`/github/repos?query=${encodeURIComponent(query)}`);
+    const repos = data.repositories || [];
+    repoSelect.replaceChildren();
+    if (!repos.length) {
+      repoSelect.innerHTML = `<option value="">No repositories found</option>`;
+      return;
+    }
+    for (const repo of repos) {
+      const option = document.createElement("option");
+      option.value = repo.full_name;
+      option.textContent = repo.full_name;
+      option.dataset.defaultBranch = repo.default_branch || "main";
+      repoSelect.appendChild(option);
+    }
+    await refreshBranches();
+  } catch (err) {
+    repoSelect.innerHTML = `<option value="">${err.message}</option>`;
+  }
+}
+
+async function refreshBranches() {
+  const fullName = repoSelect.value;
+  branchSelect.innerHTML = `<option value="">Loading branches...</option>`;
+  if (!fullName || !fullName.includes("/")) {
+    branchSelect.innerHTML = `<option value="">Select a repo</option>`;
+    updateRunButtonState();
+    return;
+  }
+  const [owner, repo] = fullName.split("/");
+  try {
+    const data = await apiJson(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`);
+    const branches = data.branches || [];
+    branchSelect.replaceChildren();
+    for (const branch of branches) {
+      const option = document.createElement("option");
+      option.value = branch.name;
+      option.textContent = branch.protected ? `${branch.name} (protected)` : branch.name;
+      option.dataset.protected = branch.protected ? "true" : "false";
+      branchSelect.appendChild(option);
+    }
+    const defaultBranch = repoSelect.selectedOptions[0]?.dataset.defaultBranch;
+    if (defaultBranch && branches.some((branch) => branch.name === defaultBranch)) {
+      branchSelect.value = defaultBranch;
+    }
+  } catch (err) {
+    branchSelect.innerHTML = `<option value="">${err.message}</option>`;
+  }
+  updateRunButtonState();
+}
+
+async function refreshAgentJobs() {
+  if (!agentJobListEl) return;
+  try {
+    const data = await apiJson("/agent/jobs");
+    agentJobs = data.jobs || [];
+  } catch (err) {
+    agentJobListEl.textContent = `Failed to load jobs: ${err.message}`;
+    return;
+  }
+  renderAgentJobs();
+}
+
+function renderAgentJobs() {
+  agentJobListEl.innerHTML = "";
+  if (!agentJobs.length) {
+    agentJobListEl.textContent = "No jobs yet.";
+    return;
+  }
+  for (const job of agentJobs) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `agent-job-item ${job.id === selectedAgentJobId ? "active" : ""}`;
+    item.innerHTML = `
+      <span class="job-name">${escapeHtml(job.repo_full_name)} @ ${escapeHtml(job.base_branch)}</span>
+      <span class="job-meta">${escapeHtml(job.status)} - ${escapeHtml(job.model)}</span>
+    `;
+    item.onclick = () => selectAgentJob(job.id);
+    agentJobListEl.appendChild(item);
+  }
+}
+
+async function selectAgentJob(jobId) {
+  selectedAgentJobId = jobId;
+  agentLogs = [];
+  renderAgentJobs();
+  agentJobLogs.textContent = "Connecting to job events...";
+  agentJobDiff.textContent = "Loading diff...";
+  try {
+    const job = await apiJson(`/agent/jobs/${jobId}`);
+    upsertAgentJob(job);
+    renderAgentJobDetail(job);
+    await loadAgentJobDiff(jobId);
+    startAgentEventStream(jobId);
+  } catch (err) {
+    agentJobSummary.textContent = err.message;
+  }
+}
+
+function upsertAgentJob(job) {
+  const index = agentJobs.findIndex((existing) => existing.id === job.id);
+  if (index === -1) agentJobs.unshift(job);
+  else agentJobs[index] = { ...agentJobs[index], ...job };
+}
+
+function renderAgentJobDetail(job) {
+  if (!job) return;
+  agentJobTitle.textContent = job.repo_full_name;
+  agentJobSummary.textContent = `${job.status} - ${job.base_branch} - ${job.model}`;
+  cancelCodeJobBtn.classList.toggle("hidden", TERMINAL_JOB_STATUSES.has(job.status));
+  renderJobTimeline(job.steps || []);
+}
+
+function renderJobTimeline(steps) {
+  agentJobTimeline.innerHTML = "";
+  for (const step of steps) {
+    const item = document.createElement("span");
+    item.className = `timeline-step ${step.status || "pending"}`;
+    item.textContent = `${step.position}. ${step.name}: ${step.status || "pending"}`;
+    agentJobTimeline.appendChild(item);
+  }
+}
+
+async function loadAgentJobDiff(jobId) {
+  try {
+    const data = await apiJson(`/agent/jobs/${jobId}/diff`);
+    agentJobDiff.textContent = data.diff || "No diff artifact yet.";
+  } catch (err) {
+    agentJobDiff.textContent = `Failed to load diff: ${err.message}`;
+  }
+}
+
+async function startAgentEventStream(jobId) {
+  stopAgentEventStream();
+  agentEventsAbort = new AbortController();
+  try {
+    const res = await fetch(`${API}/agent/jobs/${jobId}/events`, {
+      headers: authHeaders(),
+      signal: agentEventsAbort.signal,
+    });
+    if (!res.ok) throw new Error(`Event stream failed (${res.status})`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
+      for (const chunk of chunks) processAgentEventChunk(chunk);
+    }
+    if (buffer.trim()) processAgentEventChunk(buffer);
+  } catch (err) {
+    if (err.name !== "AbortError") appendAgentLog({ level: "error", message: err.message });
+  } finally {
+    if (selectedAgentJobId === jobId) {
+      await Promise.all([refreshAgentJobs(), loadAgentJobDiff(jobId)]);
+    }
+  }
+}
+
+function stopAgentEventStream() {
+  if (agentEventsAbort) agentEventsAbort.abort();
+  agentEventsAbort = null;
+}
+
+function processAgentEventChunk(chunk) {
+  const event = chunk.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+  const dataLine = chunk.split("\n").find((line) => line.startsWith("data:"));
+  if (!dataLine) return;
+  let payload;
+  try { payload = JSON.parse(dataLine.slice(5).trim()); } catch { return; }
+  if (event === "log") appendAgentLog(payload);
+  if (event === "status") {
+    upsertAgentJob(payload);
+    if (payload.id === selectedAgentJobId) renderAgentJobDetail(payload);
+    renderAgentJobs();
+  }
+}
+
+function appendAgentLog(log) {
+  if (log.id && agentLogs.some((existing) => existing.id === log.id)) return;
+  agentLogs.push(log);
+  agentJobLogs.textContent = agentLogs
+    .map((entry) => `[${entry.level || "info"}] ${entry.message || ""}`)
+    .join("\n") || "No logs yet.";
+  agentJobLogs.scrollTop = agentJobLogs.scrollHeight;
+}
+
+function updateRunButtonState() {
+  if (!runCodeJobBtn) return;
+  const enabled =
+    !!agentStatus?.enabled &&
+    !!githubStatus?.connected &&
+    !!repoSelect.value &&
+    !!branchSelect.value &&
+    !!agentModelSelect.value &&
+    !!agentTaskInput.value.trim();
+  runCodeJobBtn.disabled = !enabled;
+  if (!agentStatus?.enabled) codeJobFormStatus.textContent = "Agent jobs are disabled until sandbox canaries pass.";
+  else if (!githubStatus?.connected) codeJobFormStatus.textContent = "Connect GitHub first.";
+  else codeJobFormStatus.textContent = "";
+}
+
+async function createAgentJob(e) {
+  e.preventDefault();
+  updateRunButtonState();
+  if (runCodeJobBtn.disabled) return;
+  runCodeJobBtn.disabled = true;
+  codeJobFormStatus.textContent = "Queuing job...";
+  try {
+    const job = await apiJson("/agent/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        repo_full_name: repoSelect.value,
+        base_branch: branchSelect.value,
+        model: agentModelSelect.value,
+        task: agentTaskInput.value.trim(),
+        test_command: agentTestCommandInput.value.trim() || null,
+      }),
+    });
+    codeJobFormStatus.textContent = `Queued ${job.id.slice(0, 12)}.`;
+    agentTaskInput.value = "";
+    upsertAgentJob(job);
+    renderAgentJobs();
+    await selectAgentJob(job.id);
+  } catch (err) {
+    codeJobFormStatus.textContent = err.message;
+  } finally {
+    updateRunButtonState();
+  }
+}
+
+async function cancelSelectedAgentJob() {
+  if (!selectedAgentJobId) return;
+  try {
+    const data = await apiJson(`/agent/jobs/${selectedAgentJobId}/cancel`, { method: "POST" });
+    upsertAgentJob(data.job);
+    renderAgentJobDetail(data.job);
+    renderAgentJobs();
+  } catch (err) {
+    appendAgentLog({ level: "error", message: err.message });
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+githubConnectBtn?.addEventListener("click", startGithubInstall);
+settingsGithubConnect?.addEventListener("click", startGithubInstall);
+refreshCodeJobsBtn?.addEventListener("click", async () => {
+  await Promise.all([refreshAgentStatus(), refreshGithubStatus(), refreshAgentJobs()]);
+});
+repoSearchBtn?.addEventListener("click", refreshRepos);
+repoSearchInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    refreshRepos();
+  }
+});
+repoSelect?.addEventListener("change", refreshBranches);
+[branchSelect, agentModelSelect, agentTaskInput].forEach((el) => {
+  el?.addEventListener("input", updateRunButtonState);
+  el?.addEventListener("change", updateRunButtonState);
+});
+codeJobForm?.addEventListener("submit", createAgentJob);
+cancelCodeJobBtn?.addEventListener("click", cancelSelectedAgentJob);
+
 /* ---------- Models ---------- */
 
 async function loadModels() {
@@ -248,26 +666,35 @@ async function loadModels() {
     const models = [...(data.models ?? [])].sort(
       (a, b) => (a.size || 0) - (b.size || 0) || String(a.name).localeCompare(String(b.name))
     );
-    modelSelect.replaceChildren();
-    if (models.length) {
-      for (const model of models) {
-        const option = document.createElement("option");
-        option.value = model.name;
-        option.textContent = model.name;
-        modelSelect.appendChild(option);
-      }
-    } else {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "No models found";
-      modelSelect.appendChild(option);
-    }
+    populateModelSelect(modelSelect, models);
+    populateModelSelect(agentModelSelect, models);
     // Restore the conversation's saved model if applicable.
     if (currentConversation?.model) modelSelect.value = currentConversation.model;
     return models;
   } catch {
     modelSelect.innerHTML = `<option value="">Ollama unavailable</option>`;
+    agentModelSelect.innerHTML = `<option value="">Ollama unavailable</option>`;
     return [];
+  }
+}
+
+function populateModelSelect(selectEl, models) {
+  if (!selectEl) return;
+  const previous = selectEl.value;
+  selectEl.replaceChildren();
+  if (models.length) {
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.name;
+      option.textContent = model.name;
+      selectEl.appendChild(option);
+    }
+    if (previous && models.some((m) => m.name === previous)) selectEl.value = previous;
+  } else {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No models found";
+    selectEl.appendChild(option);
   }
 }
 
@@ -410,6 +837,7 @@ async function deleteConversation(id) {
 
 newChatBtn.addEventListener("click", () => {
   if (isStreaming) return;
+  showChatView();
   currentConversationId = null;
   currentConversation = null;
   messages = [];
@@ -419,6 +847,30 @@ newChatBtn.addEventListener("click", () => {
   updateTokenCounter();
   inputEl.focus();
 });
+
+codeJobsBtn.addEventListener("click", () => {
+  showCodeJobsView();
+});
+
+async function showChatView() {
+  activeView = "chat";
+  chatWorkspace.classList.remove("hidden");
+  codeJobsView.classList.add("hidden");
+  newChatBtn.classList.add("active");
+  codeJobsBtn.classList.remove("active");
+  stopAgentEventStream();
+}
+
+async function showCodeJobsView() {
+  activeView = "code-jobs";
+  chatWorkspace.classList.add("hidden");
+  codeJobsView.classList.remove("hidden");
+  newChatBtn.classList.remove("active");
+  codeJobsBtn.classList.add("active");
+  await Promise.all([refreshAgentStatus(), refreshGithubStatus(), refreshAgentJobs()]);
+  if (githubStatus?.connected && !repoSelect.value) await refreshRepos();
+  refreshIcons();
+}
 
 /* ---------- Messages rendering ---------- */
 
@@ -809,7 +1261,7 @@ async function openSettings() {
   settingsTopK.value = c.top_k ?? 40;
   updateSliderLabels();
   // If no conversation yet, settings live only in-memory until first message.
-  await Promise.all([refreshModelList(), refreshWorkerList()]);
+  await Promise.all([refreshModelList(), refreshWorkerList(), refreshGithubStatus()]);
   settingsModal.classList.remove("hidden");
 }
 

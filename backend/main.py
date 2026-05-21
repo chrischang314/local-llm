@@ -52,6 +52,8 @@ from auth import (
     verify_password,
 )
 from database import AsyncSessionLocal, Base, engine, get_db, migrate_schema
+from agent_routes import router as agent_router
+from github_routes import router as github_router
 from models import Conversation
 from models import Message as DBMessage
 from models import User
@@ -84,6 +86,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Conversation-Id", "X-LLM-Backend"],
 )
+
+app.include_router(github_router)
+app.include_router(agent_router)
 
 
 # ---------------------------------------------------------------------------

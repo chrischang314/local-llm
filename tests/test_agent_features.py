@@ -1,0 +1,123 @@
+import importlib.util
+import hmac
+import os
+import pathlib
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "backend"))
+os.environ.setdefault("JWT_SECRET", "test-suite-secret")
+
+import agent_executor  # noqa: E402
+import agent_services  # noqa: E402
+from models import AgentJob  # noqa: E402
+
+
+class AgentServiceTests(unittest.TestCase):
+    def test_agent_jobs_enabled_is_feature_gated(self):
+        with patch.dict(os.environ, {"AGENT_JOBS_ENABLED": "false"}, clear=False):
+            self.assertFalse(agent_services.agent_jobs_enabled())
+        with patch.dict(os.environ, {"AGENT_JOBS_ENABLED": "true"}, clear=False):
+            self.assertTrue(agent_services.agent_jobs_enabled())
+
+    def test_logs_are_redacted_and_diff_is_clamped(self):
+        redacted = agent_services.redact_log(
+            "token ghp_abcdefghijklmnopqrstuvwxyz123456 and github_pat_abcdefghijklmnopqrstuvwxyz123456"
+        )
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz123456", redacted)
+        self.assertNotIn("github_pat_abcdefghijklmnopqrstuvwxyz123456", redacted)
+        self.assertIn("[REDACTED]", redacted)
+
+        with patch.object(agent_services, "MAX_DIFF_CHARS", 12):
+            self.assertEqual(agent_services.clamp_diff("short"), "short")
+            self.assertTrue(agent_services.clamp_diff("x" * 20).endswith("[diff truncated]\n"))
+
+    def test_callback_token_is_bound_to_job_id(self):
+        with patch.dict(os.environ, {"AGENT_SECRET_KEY": "runner-secret"}, clear=False):
+            first = agent_services.callback_token("job-a")
+            second = agent_services.callback_token("job-b")
+            repeat = agent_services.callback_token("job-a")
+        self.assertNotEqual(first, second)
+        self.assertTrue(hmac.compare_digest(first, repeat))
+
+
+class KubernetesExecutorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_launch_uses_restricted_job_manifest_and_secret_refs(self):
+        calls = []
+
+        async def fake_k8s_request(method, path, *, body=None, content_type="application/json"):
+            calls.append({"method": method, "path": path, "body": body, "content_type": content_type})
+            if path.endswith("/jobs") and method == "POST":
+                return {"metadata": {"uid": "job-uid-123"}}
+            return {}
+
+        job = AgentJob(
+            id="abcdef1234567890",
+            repo_full_name="owner/repo",
+            base_branch="main",
+            work_branch="agent/abcdef123456",
+            model="llama3.2:3b",
+            task="make a small change",
+            test_command="python -m unittest discover -s tests",
+        )
+
+        original = agent_executor._k8s_request
+        agent_executor._k8s_request = fake_k8s_request
+        try:
+            with patch.dict(os.environ, {"AGENT_SECRET_KEY": "runner-secret"}, clear=False):
+                result = await agent_executor.kubernetes_agent_executor.launch(job, "ghs_secret_token")
+        finally:
+            agent_executor._k8s_request = original
+
+        self.assertEqual(result.namespace, "local-llm-sandbox")
+        self.assertEqual(len(calls), 3)
+        secret_body = calls[0]["body"]
+        self.assertEqual(secret_body["kind"], "Secret")
+        self.assertIn("github-token", secret_body["data"])
+        self.assertIn("agent-callback-token", secret_body["data"])
+        self.assertNotIn("ghs_secret_token", str(calls[1]["body"]))
+
+        job_body = calls[1]["body"]
+        pod_spec = job_body["spec"]["template"]["spec"]
+        container = pod_spec["containers"][0]
+        init_container = pod_spec["initContainers"][0]
+        self.assertFalse(pod_spec["automountServiceAccountToken"])
+        self.assertFalse(container["securityContext"]["allowPrivilegeEscalation"])
+        self.assertTrue(container["securityContext"]["readOnlyRootFilesystem"])
+        self.assertEqual(container["securityContext"]["capabilities"], {"drop": ["ALL"]})
+        self.assertFalse(init_container["securityContext"]["allowPrivilegeEscalation"])
+        self.assertEqual(init_container["securityContext"]["capabilities"], {"drop": ["ALL"]})
+        runner_env = {item["name"]: item for item in container["env"]}
+        self.assertIn("GITHUB_TOKEN_FILE", runner_env)
+        self.assertNotIn("GITHUB_TOKEN", runner_env)
+        self.assertNotIn("AGENT_CALLBACK_TOKEN", runner_env)
+        self.assertIn("agent-secrets", [volume["name"] for volume in pod_spec["volumes"]])
+        self.assertEqual(job_body["spec"]["backoffLimit"], 0)
+        self.assertEqual(job_body["spec"]["activeDeadlineSeconds"], 1800)
+        self.assertFalse(any("hostPath" in volume for volume in pod_spec["volumes"]))
+        self.assertIn("ownerReferences", calls[2]["body"]["metadata"])
+
+
+class AgentRunnerPathTests(unittest.TestCase):
+    def test_runner_refuses_paths_outside_workspace_and_git_dir_writes(self):
+        runner_path = REPO_ROOT / "agent-runner" / "runner.py"
+        spec = importlib.util.spec_from_file_location("agent_runner_test_module", runner_path)
+        runner = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(runner)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner.REPO_DIR = pathlib.Path(tmp)
+            self.assertEqual(runner.safe_path("src/app.py"), pathlib.Path(tmp) / "src" / "app.py")
+            with self.assertRaises(ValueError):
+                runner.safe_path("../outside.txt")
+            with self.assertRaises(ValueError):
+                runner.safe_path(".git/config")
+
+
+if __name__ == "__main__":
+    unittest.main()

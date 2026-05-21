@@ -48,6 +48,42 @@ worker summary:
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and available worker capacity.
 
+## Code Jobs And GitHub App Integration
+
+The app includes a gated Code Jobs workspace for authenticated users. It can
+connect a GitHub App installation, list installed repositories and branches, and
+queue agentic coding jobs that run inside isolated Kubernetes Jobs.
+
+Live code execution is disabled by default. Enable it only after the sandbox
+namespace, NetworkPolicy enforcement, and canary tests pass:
+
+```powershell
+kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
+```
+
+Required backend environment variables:
+
+- `GITHUB_APP_ID`
+- `GITHUB_APP_SLUG`
+- `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE`
+- `AGENT_SECRET_KEY`
+- `GITHUB_ALLOWED_INSTALLATION_IDS`
+- `AGENT_JOBS_ENABLED=true` after sandbox validation
+
+`GITHUB_ALLOWED_INSTALLATION_IDS` is a comma-separated allowlist. The app may
+show GitHub connection status without it, but live job creation is blocked until
+the connected installation id is explicitly allowed.
+
+The runner image is built from `agent-runner/` and published by GitHub Actions as
+`ghcr.io/<owner>/<repo>/agent-runner`. Each job gets a short-lived GitHub App
+installation token, clones the selected repository, creates an `agent/<job-id>`
+branch, runs a bounded 20-iteration tool loop, runs the configured test command,
+and only then requests a fresh installation token for push/PR operations. The
+model tool loop can read/search/write files and inspect diffs; arbitrary shell
+commands are disabled. If the branch is protected or the push diverges, the
+runner pushes the agent branch and creates a PR instead. If no test command is
+supplied, it must not update the base branch.
+
 ## Login Persistence
 
 The browser stores the active login token in `localStorage`, so closing and

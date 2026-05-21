@@ -53,6 +53,48 @@ stores a generated signing key under the persistent app data directory
 (`/app/data/jwt_secret` in containers). That generated key is runtime state and
 must stay out of git.
 
+## Agentic Code Jobs
+
+Code Jobs are intentionally separate from chat. Chat remains a conversational UI
+over routed Ollama workers; Code Jobs are authenticated operational workflows
+that connect to GitHub through a GitHub App installation and execute inside a
+dedicated Kubernetes sandbox namespace.
+
+The backend stores GitHub installation records, queued jobs, ordered steps, logs,
+and diff artifacts in SQLite. The frontend talks to `/github/*` for installation
+status, repository listing, and branch lookup, then `/agent/*` for create/list,
+detail, SSE events, cancellation, and diff retrieval.
+
+The execution path is:
+
+1. User chooses repository, branch, model, task, and optional test command.
+2. Backend mints a short-lived GitHub App installation token and creates a
+   Kubernetes Job in `local-llm-sandbox`.
+3. Runner clones the repository, creates an `agent/<job-id>` branch, uses the
+   local OpenAI-compatible API for a bounded 20-iteration read/search/write
+   tool loop, commits changes, runs tests, requests a fresh push token only
+   after tests pass, rebases, and pushes only after tests pass.
+4. Branch protection, divergence, or a missing test command prevents direct base
+   branch updates. In those cases the runner pushes the agent branch and opens a
+   PR, and the job ends as `needs_review`.
+
+The sandbox namespace has restricted Pod Security labels, quota/limit defaults,
+default-deny networking, no service-account token in execution pods, no hostPath
+mounts, no Docker socket, a read-only container root filesystem, dropped Linux
+capabilities, seccomp `RuntimeDefault`, and bounded CPU, memory, and ephemeral
+storage. Runtime secrets are copied by a restricted init container into an
+in-memory `emptyDir`; the runner container receives only file paths, reads and
+unlinks the files at startup, and never starts with raw GitHub or callback tokens
+in its environment. The runner callback token is per job, and Kubernetes Secrets
+are patched with Job owner references after launch so normal TTL cleanup can
+garbage-collect them. Keep `AGENT_JOBS_ENABLED=false` until NetworkPolicy
+enforcement and canary jobs are verified live.
+
+Residual risk: standard Kubernetes NetworkPolicy is IP/CIDR based, not
+GitHub-domain aware. The current policy allows public TCP 443 while blocking
+private/LAN ranges so GitHub operations can work. Add a controlled egress proxy
+before enabling jobs on an untrusted network or for sensitive private code.
+
 ## Operational Safety
 
 Secrets and local runtime state stay out of git. In particular, do not commit

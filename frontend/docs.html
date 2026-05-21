@@ -26,6 +26,7 @@
         <span class="nav-section">Endpoints</span>
         <a href="#list-models">GET /v1/models</a>
         <a href="#chat-completions">POST /v1/chat/completions</a>
+        <a href="#github-agent">GitHub + agent jobs</a>
         <span class="nav-section">Examples</span>
         <a href="#example-curl">cURL</a>
         <a href="#example-python">Python</a>
@@ -176,6 +177,68 @@
 data: {"id":"chatcmpl-a1b2c3d4e5f6","object":"chat.completion.chunk","choices":[{"delta":{"content":" is"}}]}
 
 data: [DONE]</code></pre>
+        </div>
+      </section>
+
+      <section id="github-agent">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="github" aria-hidden="true"></i></span>
+          <h2>GitHub + Agent Jobs</h2>
+        </div>
+        <p>
+          The Code Jobs workspace uses authenticated same-origin API routes. Live execution
+          stays disabled until the Kubernetes sandbox canaries pass and
+          <code>AGENT_JOBS_ENABLED=true</code> plus
+          <code>GITHUB_ALLOWED_INSTALLATION_IDS</code> are set. The agent tool
+          loop can read, search, write, and inspect diffs; arbitrary shell access
+          is not exposed to the model.
+        </p>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/github/status</span>
+        </div>
+        <p>Returns GitHub App configuration and installation connection state.</p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/github/install/start</span>
+        </div>
+        <p>Creates an install state token and returns the GitHub App install URL.</p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/github/install/complete</span>
+        </div>
+        <p>Completes the GitHub App install callback with <code>installation_id</code> and <code>state</code>.</p>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/github/repos</span>
+        </div>
+        <p>Lists repositories visible to the connected GitHub App installation.</p>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/agent/status</span>
+        </div>
+        <p>Reports whether code execution is enabled and which secret/config values are missing.</p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/agent/jobs</span>
+        </div>
+        <p>Queues a code job. Jobs require <code>repo_full_name</code>, <code>base_branch</code>, <code>task</code>, <code>model</code>, and optional <code>test_command</code>.</p>
+
+        <div class="code-block">
+          <div class="code-label">Create job body</div>
+          <pre><code>{
+  "repo_full_name": "owner/repo",
+  "base_branch": "main",
+  "task": "Fix the failing unit test and update docs.",
+  "model": "qwen2.5-coder:7b",
+  "test_command": "python -m unittest discover -s tests"
+}</code></pre>
         </div>
       </section>
 

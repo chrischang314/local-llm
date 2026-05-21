@@ -19,12 +19,35 @@
   Windows session.
 - `llama3.2:3b` is installed on CHRIS-PC-1 and was verified with a direct
   generate request from inside the Kubernetes backend pod.
+- A gated Code Jobs workspace now exists for GitHub App-backed code execution.
+  The backend exposes `/github/*` and `/agent/*`, nginx proxies both prefixes,
+  and the runner image lives in `agent-runner/`.
+- `AGENT_JOBS_ENABLED` should remain `false` until the live
+  `local-llm-sandbox` NetworkPolicy and canary checks pass. The UI will show the
+  feature as disabled but still lets users inspect GitHub connection state.
 
 ## Safe Continuation Notes
 
 - Do not commit kubeconfigs, service-account tokens, SSH keys, Docker auth
   files, anything under `.docker-worker/`, or any generated `data/jwt_secret`
   file.
+- Do not commit `GITHUB_APP_PRIVATE_KEY`, GitHub installation tokens,
+  `AGENT_SECRET_KEY`, webhook secrets, kube service-account tokens, or runner
+  callback payloads that contain secrets. Use Kubernetes Secrets for live
+  deployment.
+- Code Jobs direct-push policy is deliberately conservative: tests must pass
+  before pushing to the selected base branch. No test command means the runner
+  can push only an `agent/<job-id>` branch and open a PR.
+- Runners receive a per-job callback token derived from `AGENT_SECRET_KEY`, not
+  the global secret. The initial clone token is used only for clone; after tests
+  pass, the runner asks the backend for a fresh short-lived installation token
+  for push/PR work.
+- The model tool loop must not get arbitrary shell access. It can list, read,
+  search, write, inspect diff, and finish. Only the configured test command runs
+  as a shell command.
+- `GITHUB_ALLOWED_INSTALLATION_IDS` is required before live job creation. Keep it
+  in the backend Kubernetes Secret as a comma-separated list of installation ids
+  that this LAN deployment is allowed to use.
 - If an existing browser token was signed before this persistence change, the
   user may need to sign in once after deployment. New tokens should survive tab
   closes and backend restarts until logout or token expiry.
@@ -42,6 +65,12 @@ kubectl apply -f .\k8s\local-llm\ollama-backends-configmap.yaml
 .\scripts\deploy-live-default-app-overrides.ps1
 ```
 
+- To apply the sandbox resources without enabling jobs:
+
+```powershell
+kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
+```
+
 - To refresh the CHRIS-PC-1 controller files, copy the scripts to
   `C:\Users\chris\Projects\local-llm\scripts` on that host and rerun
   `install-local-ollama-worker-controller.ps1` with the CHRIS-PC-1 parameters in
@@ -50,6 +79,14 @@ kubectl apply -f .\k8s\local-llm\ollama-backends-configmap.yaml
 ## Verification Notes
 
 - Focused health unit coverage lives in `tests/test_health.py`.
+- Agent feature coverage lives in `tests/test_agent_features.py`.
 - For a live smoke check, call `http://localllm.lan/health` and confirm the
   `workers` object is present, then open the chat UI and inspect the sidebar
   health label.
+- Before setting `AGENT_JOBS_ENABLED=true`, run sandbox canaries for a successful
+  command, a failing command, timeout behavior, blocked kube API access, blocked
+  app-secret access, and blocked Docker socket access.
+- Kubernetes NetworkPolicy cannot reliably express GitHub-by-domain egress.
+  This manifest blocks private/LAN ranges and permits public TCP 443 for GitHub
+  operations. Treat public egress as a known residual risk until a domain-aware
+  egress proxy is added.
