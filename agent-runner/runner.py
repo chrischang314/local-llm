@@ -387,7 +387,19 @@ def extract_json_object(raw: str) -> dict[str, Any]:
         end = text.rfind("}")
         if start != -1 and end != -1:
             text = text[start : end + 1]
-    parsed = json.loads(text)
+    text = re.sub(
+        r'"""(.*?)"""',
+        lambda match: json.dumps(match.group(1)),
+        text,
+        flags=re.S,
+    )
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed, end_index = json.JSONDecoder().raw_decode(text)
+        rest = text[end_index:]
+        if rest.strip().strip("}").strip():
+            raise
     if not isinstance(parsed, dict):
         raise ValueError("model response must be a JSON object")
     return parsed
@@ -397,6 +409,13 @@ def parse_action(raw: str) -> dict[str, Any]:
     parsed = extract_json_object(raw)
     if "action" not in parsed:
         raise ValueError("model response must be a JSON object with an action")
+    if parsed.get("action") == "write_file" and "args" not in parsed:
+        parsed["args"] = {
+            "path": parsed.pop("path", ""),
+            "content": parsed.pop("content", ""),
+        }
+    elif parsed.get("action") == "run_shell" and "args" not in parsed:
+        parsed["args"] = {"command": parsed.pop("command", "")}
     return parsed
 
 

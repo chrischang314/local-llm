@@ -138,6 +138,16 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(nested_action["action"], "write_file")
         self.assertEqual(nested_action["args"]["path"], "calculator.py")
 
+        lenient_action = runner.parse_action(
+            '{"action": "write_file", "path": "calculator.py", "content": """def add(a, b):\n'
+            '    return a + b\n\n'
+            'def subtract(a, b):\n'
+            '    return a - b\n'
+            '"""}}'
+        )
+        self.assertEqual(lenient_action["args"]["path"], "calculator.py")
+        self.assertIn("def subtract", lenient_action["args"]["content"])
+
         approved = runner.parse_decision(
             '{"status":"approved","summary":"looks good","issues":[]}'
         )
