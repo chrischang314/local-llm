@@ -86,6 +86,11 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 - Before setting `AGENT_JOBS_ENABLED=true`, run sandbox canaries for a successful
   command, a failing command, timeout behavior, blocked kube API access, blocked
   app-secret access, and blocked Docker socket access.
+- Live canary on 2026-05-21: an agent-labeled pod in `local-llm-sandbox`
+  reached `https://kubernetes.default.svc` and received `401 Unauthorized`.
+  That means the current live cluster did not enforce the intended kube-API
+  egress block. Keep `AGENT_JOBS_ENABLED=false` until CNI/NetworkPolicy
+  enforcement is fixed or an additional egress-control layer is added.
 - Kubernetes NetworkPolicy cannot reliably express GitHub-by-domain egress.
   This manifest blocks private/LAN ranges and permits public TCP 443 for GitHub
   operations. Treat public egress as a known residual risk until a domain-aware
