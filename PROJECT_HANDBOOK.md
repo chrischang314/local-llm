@@ -66,6 +66,11 @@ and diff artifacts in SQLite. The frontend talks to `/github/*` for installation
 status, repository listing, and branch lookup, then `/agent/*` for create/list,
 detail, SSE events, cancellation, and diff retrieval.
 
+The intended authorization path is a GitHub App installation. A temporary
+`GITHUB_BYPASS_TOKEN` escape hatch exists only for controlled LAN smoke tests
+against disposable repositories before the GitHub App is configured. It should
+not replace installation tokens for normal use.
+
 The execution path is:
 
 1. User chooses repository, branch, model, task, and optional test command.

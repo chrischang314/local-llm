@@ -38,14 +38,32 @@ class GitHubAppConfig:
 
 
 class GitHubAppClient:
+    def _read_secret(self, env_name: str, file_env_name: str) -> str:
+        value = os.getenv(env_name, "")
+        path = os.getenv(file_env_name, "")
+        if value:
+            return value
+        if not path:
+            return ""
+        try:
+            return pathlib.Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    def bypass_token(self) -> str:
+        """Emergency local test token used only when no GitHub App exists.
+
+        This is intentionally separate from the GitHub App config because it is
+        a trusted-LAN/testing escape hatch, not the production authorization
+        model. Prefer GitHub App installation tokens for normal operation.
+        """
+        return self._read_secret("GITHUB_BYPASS_TOKEN", "GITHUB_BYPASS_TOKEN_FILE")
+
+    def bypass_token_configured(self) -> bool:
+        return bool(self.bypass_token())
+
     def config(self) -> GitHubAppConfig:
-        key = os.getenv("GITHUB_APP_PRIVATE_KEY")
-        key_file = os.getenv("GITHUB_APP_PRIVATE_KEY_FILE")
-        if not key and key_file:
-            try:
-                key = pathlib.Path(key_file).read_text(encoding="utf-8")
-            except OSError:
-                key = None
+        key = self._read_secret("GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_FILE")
         if key:
             key = key.replace("\\n", "\n")
         return GitHubAppConfig(
@@ -88,6 +106,26 @@ class GitHubAppClient:
         }
 
     async def get_installation(self, installation_id: str) -> dict[str, Any]:
+        token = self.bypass_token()
+        if token:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(f"{GITHUB_API}/user", headers=self.token_headers(token))
+                response.raise_for_status()
+                user = response.json()
+            return {
+                "id": installation_id,
+                "account": {
+                    "login": user.get("login"),
+                    "type": user.get("type") or "User",
+                },
+                "app_slug": "bypass-token",
+                "repository_selection": "all",
+                "permissions": {
+                    "contents": "write",
+                    "metadata": "read",
+                    "pull_requests": "write",
+                },
+            }
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(
                 f"{GITHUB_API}/app/installations/{installation_id}",
@@ -97,6 +135,9 @@ class GitHubAppClient:
             return response.json()
 
     async def create_installation_token(self, installation_id: str) -> dict[str, Any]:
+        token = self.bypass_token()
+        if token:
+            return {"token": token, "expires_at": None}
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 f"{GITHUB_API}/app/installations/{installation_id}/access_tokens",
@@ -115,15 +156,27 @@ class GitHubAppClient:
     ) -> dict[str, Any]:
         token = (await self.create_installation_token(installation_id))["token"]
         async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(
-                f"{GITHUB_API}/installation/repositories",
-                headers=self.token_headers(token),
-                params={"page": max(page, 1), "per_page": min(max(per_page, 1), 100)},
-            )
+            if self.bypass_token_configured():
+                response = await client.get(
+                    f"{GITHUB_API}/user/repos",
+                    headers=self.token_headers(token),
+                    params={
+                        "affiliation": "owner,collaborator,organization_member",
+                        "sort": "updated",
+                        "page": max(page, 1),
+                        "per_page": min(max(per_page, 1), 100),
+                    },
+                )
+            else:
+                response = await client.get(
+                    f"{GITHUB_API}/installation/repositories",
+                    headers=self.token_headers(token),
+                    params={"page": max(page, 1), "per_page": min(max(per_page, 1), 100)},
+                )
             response.raise_for_status()
             payload = response.json()
 
-        repos = payload.get("repositories", [])
+        repos = payload if isinstance(payload, list) else payload.get("repositories", [])
         if query:
             needle = query.lower()
             repos = [
@@ -133,7 +186,7 @@ class GitHubAppClient:
             ]
         return {
             "repositories": [self._repo_summary(repo) for repo in repos],
-            "total_count": payload.get("total_count", len(repos)),
+            "total_count": len(repos) if isinstance(payload, list) else payload.get("total_count", len(repos)),
         }
 
     async def branches(self, installation_id: str, owner: str, repo: str) -> list[dict[str, Any]]:

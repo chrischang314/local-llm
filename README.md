@@ -76,6 +76,12 @@ Required backend environment variables:
 show GitHub connection status without it, but live job creation is blocked until
 the connected installation id is explicitly allowed.
 
+For a controlled live smoke test before a GitHub App exists, the backend also
+recognizes `GITHUB_BYPASS_TOKEN` or `GITHUB_BYPASS_TOKEN_FILE`. This treats a
+single Kubernetes Secret-backed GitHub token as the installation token source and
+should be temporary, LAN-only, and limited to disposable repositories. The normal
+production path remains the GitHub App installation flow above.
+
 The runner image is built from `agent-runner/` and published by GitHub Actions as
 `ghcr.io/<owner>/<repo>/agent-runner`. Each job gets a short-lived GitHub App
 installation token, clones the selected repository, creates an `agent/<job-id>`

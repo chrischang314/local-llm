@@ -36,6 +36,9 @@
   `AGENT_SECRET_KEY`, webhook secrets, kube service-account tokens, or runner
   callback payloads that contain secrets. Use Kubernetes Secrets for live
   deployment.
+- `GITHUB_BYPASS_TOKEN` / `GITHUB_BYPASS_TOKEN_FILE` is a temporary live-test
+  escape hatch for disposable repositories when no GitHub App exists. Do not use
+  it as the normal authorization model and remove the Secret/env after testing.
 - Code Jobs direct-push policy is deliberately conservative: tests must pass
   before pushing to the selected base branch. No test command means the runner
   can push only an `agent/<job-id>` branch and open a PR.

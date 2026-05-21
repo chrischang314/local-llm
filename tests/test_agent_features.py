@@ -5,7 +5,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -15,6 +15,7 @@ os.environ.setdefault("JWT_SECRET", "test-suite-secret")
 import agent_executor  # noqa: E402
 import agent_routes  # noqa: E402
 import agent_services  # noqa: E402
+import github_client  # noqa: E402
 from models import AgentJob  # noqa: E402
 
 
@@ -175,6 +176,60 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(review_calls, [1, 2])
         self.assertEqual(revision_calls[0][0], "revision")
         self.assertIn(("test", "succeeded", 0), steps)
+
+
+class GitHubBypassTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bypass_token_satisfies_agent_config_without_app_credentials(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AGENT_JOBS_ENABLED": "true",
+                "AGENT_SECRET_KEY": "runner-secret",
+                "GITHUB_ALLOWED_INSTALLATION_IDS": "bypass",
+                "GITHUB_BYPASS_TOKEN": "test-bypass-token-value",
+            },
+            clear=False,
+        ):
+            for key in ("GITHUB_APP_ID", "GITHUB_APP_SLUG", "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_FILE"):
+                os.environ.pop(key, None)
+            self.assertEqual(agent_routes._missing_agent_config(), [])
+            token = await github_client.github_app_client.create_installation_token("bypass")
+            self.assertEqual(token["token"], "test-bypass-token-value")
+
+    async def test_bypass_repo_listing_uses_user_repos_api(self):
+        seen = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [
+                    {
+                        "id": 1,
+                        "name": "demo",
+                        "full_name": "owner/demo",
+                        "private": True,
+                        "default_branch": "main",
+                    }
+                ]
+
+        async def fake_get(url, **kwargs):
+            seen["url"] = url
+            seen["headers"] = kwargs.get("headers", {})
+            return FakeResponse()
+
+        with patch.dict(os.environ, {"GITHUB_BYPASS_TOKEN": "test-bypass-token-value"}, clear=False):
+            with patch("github_client.httpx.AsyncClient") as client_class:
+                client = AsyncMock()
+                client.__aenter__.return_value.get.side_effect = fake_get
+                client_class.return_value = client
+
+                repos = await github_client.github_app_client.repositories("bypass")
+
+        self.assertTrue(seen["url"].endswith("/user/repos"))
+        self.assertIn("Bearer test-bypass-token-value", seen["headers"]["Authorization"])
+        self.assertEqual(repos["repositories"][0]["full_name"], "owner/demo")
 
 
 class AgentRunnerPathTests(unittest.TestCase):

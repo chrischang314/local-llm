@@ -107,6 +107,8 @@ def _missing_agent_config() -> list[str]:
         missing.append("AGENT_SECRET_KEY")
     if agent_jobs_enabled() and not allowed_installation_ids():
         missing.append("GITHUB_ALLOWED_INSTALLATION_IDS")
+    if github_app_client.bypass_token_configured():
+        return missing
     return missing + github_app_client.config().missing
 
 

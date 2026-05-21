@@ -68,9 +68,11 @@ async def github_status(
 ):
     config = github_app_client.config()
     installation = await current_installation(db, user_id)
+    bypass_configured = github_app_client.bypass_token_configured()
     return {
-        "configured": config.configured,
-        "missing": config.missing,
+        "configured": config.configured or bypass_configured,
+        "missing": [] if bypass_configured else config.missing,
+        "mode": "bypass_token" if bypass_configured and not config.configured else "github_app",
         "connected": installation is not None,
         "installation": _serialize_installation(installation),
     }
@@ -82,6 +84,14 @@ async def start_github_install(
     db: AsyncSession = Depends(get_db),
 ):
     config = github_app_client.config()
+    if github_app_client.bypass_token_configured() and not config.configured:
+        return {
+            "configured": True,
+            "missing": [],
+            "install_url": None,
+            "state": None,
+            "mode": "bypass_token",
+        }
     if not config.configured:
         return {
             "configured": False,
