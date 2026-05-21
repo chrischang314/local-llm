@@ -80,7 +80,7 @@ def _validate_job_request(request: AgentJobCreateRequest) -> None:
 
 
 def _initial_steps(job_id: str) -> list[AgentJobStep]:
-    names = ["clone", "plan", "edit", "test", "push"]
+    names = ["clone", "implement", "review", "revise", "test", "push"]
     return [
         AgentJobStep(job_id=job_id, position=index + 1, name=name)
         for index, name in enumerate(names)

@@ -71,11 +71,18 @@ The execution path is:
 1. User chooses repository, branch, model, task, and optional test command.
 2. Backend mints a short-lived GitHub App installation token and creates a
    Kubernetes Job in `local-llm-sandbox`.
-3. Runner clones the repository, creates an `agent/<job-id>` branch, uses the
-   local OpenAI-compatible API for a bounded 20-iteration read/search/write
-   tool loop, commits changes, runs tests, requests a fresh push token only
-   after tests pass, rebases, and pushes only after tests pass.
-4. Branch protection, divergence, or a missing test command prevents direct base
+3. Runner clones the repository and creates an `agent/<job-id>` branch.
+4. An implementation subagent uses the local OpenAI-compatible API for a bounded
+   read/search/write/inspect-diff tool loop.
+5. A reviewer subagent inspects the diff for correctness, maintainability,
+   focused scope, safety, and testability.
+6. A testing agent runs the configured test command. Reviewer or test failures
+   are sent to a revision subagent, and the review/test cycle repeats up to
+   three times before the job fails.
+7. After the reviewer and testing gates are satisfied, the runner commits the
+   final changes, requests a fresh push token, rebases, and pushes only after
+   tests pass.
+8. Branch protection, divergence, or a missing test command prevents direct base
    branch updates. In those cases the runner pushes the agent branch and opens a
    PR, and the job ends as `needs_review`.
 

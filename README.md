@@ -79,12 +79,20 @@ the connected installation id is explicitly allowed.
 The runner image is built from `agent-runner/` and published by GitHub Actions as
 `ghcr.io/<owner>/<repo>/agent-runner`. Each job gets a short-lived GitHub App
 installation token, clones the selected repository, creates an `agent/<job-id>`
-branch, runs a bounded 20-iteration tool loop, runs the configured test command,
-and only then requests a fresh installation token for push/PR operations. The
-model tool loop can read/search/write files and inspect diffs; arbitrary shell
-commands are disabled. If the branch is protected or the push diverges, the
-runner pushes the agent branch and creates a PR instead. If no test command is
-supplied, it must not update the base branch.
+branch, then runs a bounded multi-agent quality loop:
+
+1. an implementation subagent drafts the change,
+2. a reviewer subagent checks correctness, scope, maintainability, and safety,
+3. a testing agent runs the configured test command,
+4. a revision subagent fixes reviewer or test failures, repeating up to three
+   review/test cycles.
+
+The model tool loop can read/search/write files and inspect diffs; arbitrary
+shell commands are disabled. The runner requests a fresh installation token for
+push/PR operations only after the reviewer and testing gates are satisfied. If
+the branch is protected or the push diverges, the runner pushes the agent branch
+and creates a PR instead. If no test command is supplied, it must not update the
+base branch.
 
 ## Login Persistence
 

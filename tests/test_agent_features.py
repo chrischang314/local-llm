@@ -13,6 +13,7 @@ sys.path.insert(0, str(REPO_ROOT / "backend"))
 os.environ.setdefault("JWT_SECRET", "test-suite-secret")
 
 import agent_executor  # noqa: E402
+import agent_routes  # noqa: E402
 import agent_services  # noqa: E402
 from models import AgentJob  # noqa: E402
 
@@ -102,13 +103,83 @@ class KubernetesExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ownerReferences", calls[2]["body"]["metadata"])
 
 
+def load_runner_module():
+    runner_path = REPO_ROOT / "agent-runner" / "runner.py"
+    spec = importlib.util.spec_from_file_location("agent_runner_test_module", runner_path)
+    runner = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = runner
+    spec.loader.exec_module(runner)
+    return runner
+
+
+class AgentWorkflowTests(unittest.TestCase):
+    def test_job_steps_show_multi_agent_quality_loop(self):
+        steps = agent_routes._initial_steps("job-123")
+        self.assertEqual(
+            [step.name for step in steps],
+            ["clone", "implement", "review", "revise", "test", "push"],
+        )
+
+    def test_runner_parses_reviewer_and_tester_decisions(self):
+        runner = load_runner_module()
+
+        approved = runner.parse_decision(
+            '{"status":"approved","summary":"looks good","issues":[]}'
+        )
+        self.assertTrue(approved.approved)
+        self.assertEqual(approved.summary, "looks good")
+
+        requested = runner.parse_decision(
+            '{"status":"changes_requested","summary":"needs tests","issues":["missing test"]}'
+        )
+        self.assertFalse(requested.approved)
+        self.assertEqual(requested.issues, ["missing test"])
+
+        passing = runner.TestResult(supplied=True, passed=True, exit_code=0, output="ok")
+        failing = runner.TestResult(supplied=True, passed=False, exit_code=1, output="failed")
+        missing = runner.TestResult(supplied=False, passed=False, exit_code=None, output="")
+        self.assertTrue(runner.tester_agent(passing).approved)
+        self.assertFalse(runner.tester_agent(failing).approved)
+        self.assertFalse(runner.tester_agent(missing).approved)
+
+    def test_runner_quality_loop_revises_until_review_and_tests_pass(self):
+        runner = load_runner_module()
+        steps = []
+        review_calls = []
+        revision_calls = []
+
+        def fake_step(name, status, exit_code=None):
+            steps.append((name, status, exit_code))
+
+        def fake_reviewer(cycle):
+            review_calls.append(cycle)
+            if cycle == 1:
+                return runner.AgentDecision(False, "needs cleanup", ["simplify the change"])
+            return runner.AgentDecision(True, "ready for tests", [])
+
+        def fake_tool_loop(role, assignment, *, max_iterations):
+            revision_calls.append((role, assignment, max_iterations))
+            return "revised"
+
+        runner.step = fake_step
+        runner.log = lambda *args, **kwargs: None
+        runner.reviewer_agent = fake_reviewer
+        runner.run_tool_loop = fake_tool_loop
+        runner.run_tests = lambda: runner.TestResult(supplied=True, passed=True, exit_code=0, output="ok")
+
+        result = runner.run_quality_loop()
+
+        self.assertTrue(result.satisfactory)
+        self.assertTrue(result.revised)
+        self.assertEqual(review_calls, [1, 2])
+        self.assertEqual(revision_calls[0][0], "revision")
+        self.assertIn(("test", "succeeded", 0), steps)
+
+
 class AgentRunnerPathTests(unittest.TestCase):
     def test_runner_refuses_paths_outside_workspace_and_git_dir_writes(self):
-        runner_path = REPO_ROOT / "agent-runner" / "runner.py"
-        spec = importlib.util.spec_from_file_location("agent_runner_test_module", runner_path)
-        runner = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(runner)
+        runner = load_runner_module()
 
         with tempfile.TemporaryDirectory() as tmp:
             runner.REPO_DIR = pathlib.Path(tmp)

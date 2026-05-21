@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,9 +28,36 @@ MAX_OBSERVATION = 20_000
 MAX_WRITE = 1_000_000
 MAX_COMMAND_SECONDS = 120
 MAX_TEST_SECONDS = 900
+MAX_IMPLEMENTER_ITERATIONS = 12
+MAX_REVISION_ITERATIONS = 8
+MAX_REVIEW_CYCLES = 3
+MAX_REVIEW_DIFF = 120_000
 
 SECRET_KEYS = ("GITHUB_TOKEN", "AGENT_CALLBACK_TOKEN", "AGENT_SECRET")
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", ".mypy_cache", ".pytest_cache", "__pycache__"}
+
+
+@dataclass
+class AgentDecision:
+    approved: bool
+    summary: str
+    issues: list[str]
+
+
+@dataclass
+class TestResult:
+    supplied: bool
+    passed: bool
+    exit_code: int | None
+    output: str
+
+
+@dataclass
+class QualityResult:
+    satisfactory: bool
+    review_only: bool
+    revised: bool
+    summary: str
 
 
 def env(name: str, default: str = "") -> str:
@@ -303,7 +331,7 @@ def diff() -> str:
     return trim(result.stdout or "[no diff]", 200_000)
 
 
-def parse_action(raw: str) -> dict[str, Any]:
+def extract_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S)
     if fence:
@@ -314,9 +342,33 @@ def parse_action(raw: str) -> dict[str, Any]:
         if start != -1 and end != -1:
             text = text[start : end + 1]
     parsed = json.loads(text)
-    if not isinstance(parsed, dict) or "action" not in parsed:
+    if not isinstance(parsed, dict):
+        raise ValueError("model response must be a JSON object")
+    return parsed
+
+
+def parse_action(raw: str) -> dict[str, Any]:
+    parsed = extract_json_object(raw)
+    if "action" not in parsed:
         raise ValueError("model response must be a JSON object with an action")
     return parsed
+
+
+def parse_decision(raw: str) -> AgentDecision:
+    parsed = extract_json_object(raw)
+    status = str(parsed.get("status", "")).strip().lower()
+    summary = str(parsed.get("summary") or "").strip() or "No summary supplied."
+    raw_issues = parsed.get("issues") or []
+    if isinstance(raw_issues, str):
+        issues = [raw_issues]
+    elif isinstance(raw_issues, list):
+        issues = [str(item) for item in raw_issues if str(item).strip()]
+    else:
+        issues = []
+    approved = status in {"approved", "pass", "passed", "satisfactory"}
+    if not approved and not issues:
+        issues = [summary]
+    return AgentDecision(approved=approved, summary=summary, issues=issues)
 
 
 def call_llm(messages: list[dict[str, str]]) -> str:
@@ -356,27 +408,35 @@ def request_github_token() -> str:
     return token
 
 
-def run_tool_loop() -> str:
+def base_task_context() -> str:
+    return (
+        f"Repository: {REPO_FULL_NAME}\n"
+        f"Base branch: {BASE_BRANCH}\n"
+        f"Task:\n{TASK}\n\n"
+        f"Test command: {TEST_COMMAND or '[none supplied]'}"
+    )
+
+
+def run_tool_loop(role: str, assignment: str, *, max_iterations: int) -> str:
     system = (
-        "You are a careful code-editing agent running inside an isolated Kubernetes Job. "
+        f"You are the {role} subagent for a Local LLM code job running inside an isolated Kubernetes Job. "
         "Respond with exactly one JSON object per turn. Available actions are: "
         "list_files {path}, read_file {path}, search {query}, write_file {path, content}, "
         "inspect_diff {}, finish {summary}. "
         "Only modify files that are necessary for the task. Prefer reading before writing. "
-        "Do not write outside the repository. Shell commands are not available."
+        "Do not write outside the repository. Shell commands are not available. "
+        "Leave concise, maintainable changes that another reviewer can inspect."
     )
     user = (
-        f"Repository: {REPO_FULL_NAME}\n"
-        f"Base branch: {BASE_BRANCH}\n"
-        f"Task:\n{TASK}\n\n"
-        f"Test command: {TEST_COMMAND or '[none supplied]'}\n"
-        "Begin by inspecting the repository."
+        f"{base_task_context()}\n\n"
+        f"Assignment for this subagent:\n{assignment}\n\n"
+        "Begin by inspecting the repository or current diff before editing."
     )
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     final_summary = "Tool loop reached iteration limit."
 
-    for iteration in range(1, MAX_ITERATIONS + 1):
-        log(f"Agent iteration {iteration}/{MAX_ITERATIONS}.")
+    for iteration in range(1, max_iterations + 1):
+        log(f"{role.capitalize()} subagent iteration {iteration}/{max_iterations}.")
         try:
             action = parse_action(call_llm(messages))
         except Exception as exc:  # noqa: BLE001
@@ -415,6 +475,102 @@ def run_tool_loop() -> str:
 
     log(final_summary, level="warning")
     return final_summary
+
+
+def reviewer_agent(cycle: int) -> AgentDecision:
+    current_diff = diff()
+    if current_diff.strip() == "[no diff]":
+        return AgentDecision(False, "No file changes are present.", ["No diff to review."])
+    system = (
+        "You are a strict reviewer subagent for a Local LLM code job. "
+        "Review the current diff for correctness, maintainability, focused scope, safety, and testability. "
+        "Return exactly one JSON object with fields: status ('approved' or 'changes_requested'), "
+        "summary, and issues (array of strings). Approve only when the diff appears ready for tests."
+    )
+    user = (
+        f"{base_task_context()}\n\n"
+        f"Review cycle: {cycle}/{MAX_REVIEW_CYCLES}\n\n"
+        f"Current diff:\n{trim(current_diff, MAX_REVIEW_DIFF)}"
+    )
+    try:
+        decision = parse_decision(call_llm([
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]))
+    except Exception as exc:  # noqa: BLE001
+        return AgentDecision(False, "Reviewer response could not be parsed.", [str(exc)])
+    return decision
+
+
+def tester_agent(result: TestResult) -> AgentDecision:
+    if not result.supplied:
+        return AgentDecision(
+            False,
+            "No test command was supplied, so direct base-branch push is not allowed.",
+            ["Supply a test command for automatic direct push."],
+        )
+    if result.passed:
+        return AgentDecision(True, "Configured tests passed.", [])
+    return AgentDecision(
+        False,
+        f"Configured tests failed with exit code {result.exit_code}.",
+        [trim(result.output, 8_000)],
+    )
+
+
+def revision_assignment(source: str, feedback: AgentDecision) -> str:
+    issues = "\n".join(f"- {issue}" for issue in feedback.issues) or "- No issue details supplied."
+    return (
+        f"The {source} subagent requested changes. Revise the repository to address this feedback, "
+        "then inspect the diff and finish when the revision is ready for another review.\n\n"
+        f"Summary: {feedback.summary}\n"
+        f"Issues:\n{issues}"
+    )
+
+
+def run_quality_loop() -> QualityResult:
+    revised = False
+    for cycle in range(1, MAX_REVIEW_CYCLES + 1):
+        log(f"Quality loop cycle {cycle}/{MAX_REVIEW_CYCLES}.")
+
+        step("review", "in_progress")
+        review = reviewer_agent(cycle)
+        if not review.approved:
+            step("review", "failed")
+            log(f"Reviewer requested changes: {review.summary}", level="warning")
+            for issue in review.issues:
+                log(f"Reviewer issue: {issue}", level="warning")
+            if cycle == MAX_REVIEW_CYCLES:
+                return QualityResult(False, False, revised, "Reviewer did not approve the final diff.")
+            step("revise", "in_progress")
+            run_tool_loop("revision", revision_assignment("reviewer", review), max_iterations=MAX_REVISION_ITERATIONS)
+            step("revise", "succeeded")
+            revised = True
+            continue
+        step("review", "succeeded")
+        log(f"Reviewer approved: {review.summary}")
+
+        step("test", "in_progress" if TEST_COMMAND.strip() else "skipped")
+        test_result = run_tests()
+        test_decision = tester_agent(test_result)
+        if test_decision.approved:
+            step("test", "succeeded", test_result.exit_code)
+            return QualityResult(True, False, revised, "Reviewer approved and configured tests passed.")
+
+        if not test_result.supplied:
+            step("test", "skipped")
+            return QualityResult(True, True, revised, "Reviewer approved, but no test command was supplied.")
+
+        step("test", "failed", test_result.exit_code)
+        log(f"Testing agent requested changes: {test_decision.summary}", level="warning")
+        if cycle == MAX_REVIEW_CYCLES:
+            return QualityResult(False, False, revised, "Tests did not pass after the final revision cycle.")
+        step("revise", "in_progress")
+        run_tool_loop("test-fix", revision_assignment("testing", test_decision), max_iterations=MAX_REVISION_ITERATIONS)
+        step("revise", "succeeded")
+        revised = True
+
+    return QualityResult(False, False, revised, "Quality loop ended without approval.")
 
 
 def commit_if_needed() -> str | None:
@@ -461,14 +617,20 @@ def push_work_branch(token: str) -> None:
     run_with_git_token(token, ["git", "push", "-u", "origin", f"HEAD:{WORK_BRANCH}"], timeout=300, check=True)
 
 
-def run_tests() -> bool:
+def run_tests() -> TestResult:
     if not TEST_COMMAND.strip():
         log("No test command supplied; direct push to base branch is disabled.", level="warning")
-        return False
+        return TestResult(supplied=False, passed=False, exit_code=None, output="No test command supplied.")
     log(f"Running tests: {TEST_COMMAND}")
     result = run(TEST_COMMAND, shell=True, timeout=MAX_TEST_SECONDS)
-    log(trim(f"Test exit={result.returncode}\n{redact(result.stdout)}", 200_000), level="info" if result.returncode == 0 else "error")
-    return result.returncode == 0
+    output = redact(result.stdout)
+    log(trim(f"Test exit={result.returncode}\n{output}", 200_000), level="info" if result.returncode == 0 else "error")
+    return TestResult(
+        supplied=True,
+        passed=result.returncode == 0,
+        exit_code=result.returncode,
+        output=output,
+    )
 
 
 def reset_git_config() -> None:
@@ -516,29 +678,31 @@ def main() -> int:
         setup_repo()
         step("clone", "succeeded")
 
-        step("plan", "in_progress")
-        run_tool_loop()
-        step("plan", "succeeded")
+        step("implement", "in_progress")
+        run_tool_loop(
+            "implementation",
+            "Create the initial code change for the requested task. Include docs or tests when they are necessary.",
+            max_iterations=MAX_IMPLEMENTER_ITERATIONS,
+        )
+        step("implement", "succeeded")
+
+        quality = run_quality_loop()
+        if not quality.revised:
+            step("revise", "skipped")
 
         current_diff = diff()
-        step("edit", "in_progress")
+        if not quality.satisfactory:
+            step("push", "skipped")
+            finish("failed", diff=current_diff, error_summary=quality.summary)
+            return 1
+
         commit_sha = commit_if_needed()
         if not commit_sha:
-            step("edit", "failed")
-            step("test", "skipped")
             step("push", "skipped")
             finish("failed", diff="", error_summary="Agent finished without making file changes.")
             return 1
-        step("edit", "succeeded")
 
-        step("test", "in_progress" if TEST_COMMAND.strip() else "skipped")
-        tests_passed = run_tests()
-        if not tests_passed:
-            if TEST_COMMAND.strip():
-                step("test", "failed", 1)
-                step("push", "skipped")
-                finish("failed", diff=current_diff, commit_sha=commit_sha, error_summary="Configured tests failed.")
-                return 1
+        if quality.review_only:
             step("push", "in_progress")
             reset_git_config()
             push_token = request_github_token()
@@ -547,7 +711,6 @@ def main() -> int:
             step("push", "succeeded")
             finish("needs_review", diff=current_diff, commit_sha=commit_sha, pr_url=pr_url, error_summary="No test command supplied; base branch was not updated.")
             return 0
-        step("test", "succeeded", 0)
 
         step("push", "in_progress")
         log("Rebasing onto the latest base branch before push.")

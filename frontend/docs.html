@@ -191,7 +191,9 @@ data: [DONE]</code></pre>
           <code>AGENT_JOBS_ENABLED=true</code> plus
           <code>GITHUB_ALLOWED_INSTALLATION_IDS</code> are set. The agent tool
           loop can read, search, write, and inspect diffs; arbitrary shell access
-          is not exposed to the model.
+          is not exposed to the model. Code jobs use an implementation subagent,
+          reviewer subagent, testing agent, and revision subagent, with bounded
+          review/test loops before push or PR creation.
         </p>
 
         <div class="endpoint">

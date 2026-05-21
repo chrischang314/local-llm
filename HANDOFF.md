@@ -39,6 +39,9 @@
 - Code Jobs direct-push policy is deliberately conservative: tests must pass
   before pushing to the selected base branch. No test command means the runner
   can push only an `agent/<job-id>` branch and open a PR.
+- Code jobs now run a bounded multi-agent loop: implementation subagent,
+  reviewer subagent, testing agent, and revision subagent. Reviewer or test
+  failures can trigger up to three review/test cycles before the job fails.
 - Runners receive a per-job callback token derived from `AGENT_SECRET_KEY`, not
   the global secret. The initial clone token is used only for clone; after tests
   pass, the runner asks the backend for a fresh short-lived installation token
