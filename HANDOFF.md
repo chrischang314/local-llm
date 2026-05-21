@@ -30,6 +30,9 @@
   `local-llm-sandbox` NetworkPolicy and canary checks pass. The UI will show the
   feature as disabled but still lets users inspect GitHub connection state,
   enter OAuth keys, and complete GitHub sign-in.
+- Saved conversations now have an authenticated export path:
+  `GET /conversations/{id}/export?format=markdown|json`. The chat header export
+  button downloads Markdown for the active saved conversation.
 
 ## Safe Continuation Notes
 
@@ -97,6 +100,8 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 ## Verification Notes
 
 - Focused health unit coverage lives in `tests/test_health.py`.
+- Conversation export unit and route coverage lives in
+  `tests/test_conversation_export.py`.
 - Agent feature coverage lives in `tests/test_agent_features.py`.
 - For a live smoke check, call `http://localllm.lan/health` and confirm the
   `workers` object is present, then open the chat UI and inspect the sidebar

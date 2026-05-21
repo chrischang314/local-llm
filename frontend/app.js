@@ -74,6 +74,7 @@ const stopBtn = $("stop-btn");
 const modelSelect = $("model-select");
 const chatTitle = $("chat-title");
 const tokenCounter = $("token-counter");
+const exportConversationBtn = $("export-conversation-btn");
 const healthIndicator = $("health-indicator");
 
 // Settings modal
@@ -188,6 +189,7 @@ async function loadApp() {
     refreshGithubStatus(),
   ]);
   showEmptyState();
+  updateExportButtonState();
   // Refresh health every 15s so the indicator catches Ollama coming back online.
   setInterval(refreshHealth, 15000);
 }
@@ -839,6 +841,60 @@ function renderConversations() {
   }
 }
 
+function updateExportButtonState() {
+  if (!exportConversationBtn) return;
+  const canExport =
+    activeView === "chat" &&
+    !isStreaming &&
+    !!currentConversationId &&
+    messages.length > 0;
+  exportConversationBtn.disabled = !canExport;
+  exportConversationBtn.title = canExport
+    ? "Export active conversation as Markdown"
+    : "Open a saved conversation to export it";
+}
+
+async function exportCurrentConversation(format = "markdown") {
+  if (!currentConversationId || isStreaming) return;
+  exportConversationBtn.disabled = true;
+  try {
+    const res = await apiFetch(
+      `/conversations/${currentConversationId}/export?format=${encodeURIComponent(format)}`
+    );
+    if (!res.ok) {
+      let detail = `Export failed (${res.status})`;
+      try { detail = (await res.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const fallback = format === "json" ? "local-llm-conversation.json" : "local-llm-conversation.md";
+    downloadBlob(blob, filenameFromContentDisposition(res.headers.get("Content-Disposition")) || fallback);
+  } catch (err) {
+    alert(`Export failed: ${err.message}`);
+  } finally {
+    updateExportButtonState();
+  }
+}
+
+function filenameFromContentDisposition(value) {
+  if (!value) return null;
+  const match = value.match(/filename="?([^"]+)"?/i);
+  return match?.[1] || null;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+exportConversationBtn?.addEventListener("click", () => exportCurrentConversation("markdown"));
+
 function startRename(id, titleEl) {
   const original = titleEl.textContent;
   titleEl.contentEditable = "true";
@@ -902,6 +958,7 @@ async function selectConversation(id) {
     messages = await apiJson(`/conversations/${id}/messages`);
     renderMessages();
     updateTokenCounter();
+    updateExportButtonState();
   } catch {}
 }
 
@@ -916,6 +973,7 @@ async function deleteConversation(id) {
       chatTitle.textContent = "Local LLM Chat";
       showEmptyState();
       updateTokenCounter();
+      updateExportButtonState();
     }
     renderConversations();
   } catch {}
@@ -931,6 +989,7 @@ newChatBtn.addEventListener("click", () => {
   showEmptyState();
   renderConversations();
   updateTokenCounter();
+  updateExportButtonState();
   inputEl.focus();
 });
 
@@ -950,6 +1009,7 @@ async function showChatView() {
     button.classList.toggle("active", button.dataset.workspaceMode === "chat");
   });
   stopAgentEventStream();
+  updateExportButtonState();
   refreshIcons();
 }
 
@@ -974,6 +1034,7 @@ function showEmptyState() {
   el.className = "empty-state";
   el.textContent = "Start a new conversation";
   messagesEl.appendChild(el);
+  updateExportButtonState();
 }
 
 function renderMessages() {
@@ -986,6 +1047,7 @@ function renderMessages() {
     });
   });
   if (messages.length === 0) showEmptyState();
+  updateExportButtonState();
 }
 
 function renderMarkdown(content) {
@@ -1313,6 +1375,7 @@ function setStreaming(active) {
   inputEl.disabled = active;
   stopBtn.classList.toggle("hidden", !active);
   sendBtn.classList.toggle("hidden", active);
+  updateExportButtonState();
 }
 
 stopBtn.addEventListener("click", () => {

@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import pathlib
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -38,7 +39,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -378,6 +379,100 @@ async def get_messages(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return [{"id": m.id, "role": m.role, "content": m.content} for m in conv.messages]
+
+
+@app.get("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: int,
+    format: str = "markdown",
+    user_id: int = Depends(current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+        .options(selectinload(Conversation.messages))
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    export_format = format.strip().lower()
+    payload = _conversation_export_payload(conv)
+    if export_format == "json":
+        filename = _conversation_export_filename(conv, "json")
+        return JSONResponse(
+            payload,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    if export_format in {"markdown", "md"}:
+        filename = _conversation_export_filename(conv, "md")
+        return Response(
+            _conversation_export_markdown(payload),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    raise HTTPException(status_code=400, detail="Unsupported export format")
+
+
+def _conversation_export_payload(conv: Conversation) -> dict:
+    return {
+        "id": conv.id,
+        "title": conv.title or "New Chat",
+        "model": conv.model,
+        "system_prompt": conv.system_prompt or "",
+        "settings": {
+            "temperature": conv.temperature if conv.temperature is not None else 0.7,
+            "top_p": conv.top_p if conv.top_p is not None else 0.9,
+            "top_k": conv.top_k if conv.top_k is not None else 40,
+        },
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+        "messages": [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at.isoformat() if message.created_at else None,
+            }
+            for message in conv.messages
+        ],
+    }
+
+
+def _conversation_export_markdown(payload: dict) -> str:
+    lines = [
+        f"# {payload['title']}",
+        "",
+        f"- Conversation ID: {payload['id']}",
+        f"- Model: {payload['model'] or 'unspecified'}",
+        f"- Created: {payload['created_at'] or 'unknown'}",
+        f"- Updated: {payload['updated_at'] or 'unknown'}",
+        (
+            "- Settings: "
+            f"temperature {payload['settings']['temperature']}, "
+            f"top_p {payload['settings']['top_p']}, "
+            f"top_k {payload['settings']['top_k']}"
+        ),
+        "",
+    ]
+    if payload["system_prompt"]:
+        lines.extend(["## System Prompt", "", payload["system_prompt"], ""])
+    lines.append("## Messages")
+    for message in payload["messages"]:
+        role = str(message["role"] or "message").strip().title()
+        content = message["content"].strip() or "_empty message_"
+        lines.extend(["", f"### {role}", "", content])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _conversation_export_filename(conv: Conversation, extension: str) -> str:
+    timestamp = conv.updated_at or conv.created_at or datetime.now(timezone.utc)
+    date_part = timestamp.strftime("%Y%m%d")
+    words = re.findall(r"[A-Za-z0-9]+", conv.title or "")
+    slug = "-".join(words).lower()[:60].strip("-") or "conversation"
+    return f"local-llm-{date_part}-{slug}.{extension}"
 
 
 @app.delete("/conversations/{conversation_id}/messages/from/{message_id}")
