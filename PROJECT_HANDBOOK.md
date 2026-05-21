@@ -36,6 +36,11 @@ The router should only choose a backend that is enabled, reachable, and has the
 requested model installed. Optional PC workers should appear after essential
 capacity for small models unless a larger GPU is intentionally preferred.
 
+Assistant messages persist the route chosen at generation time: selected model,
+backend name, and whether the model was resident or loaded on demand. The UI
+shows that label above each assistant reply so routing behavior is visible
+without opening logs.
+
 ## Health Reporting
 
 The unauthenticated `/health` route is intentionally lightweight enough for

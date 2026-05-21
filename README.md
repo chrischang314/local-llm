@@ -48,6 +48,14 @@ worker summary:
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and available worker capacity.
 
+## Chat Routing Labels
+
+Assistant replies show the model route used for that response, for example
+`via mac-mini - llama3.2:3b - resident`. The backend stores that metadata with
+the saved assistant message, so reopening a conversation still shows which
+worker handled each reply and whether the model was already resident or loaded
+on demand.
+
 ## Code Change Mode And GitHub Integration
 
 The main workspace includes a gated Code mode for authenticated users. It can

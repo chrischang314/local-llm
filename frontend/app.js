@@ -983,6 +983,7 @@ function renderMessages() {
       id: msg.id,
       index: idx,
       isLast: idx === messages.length - 1,
+      route: msg,
     });
   });
   if (messages.length === 0) showEmptyState();
@@ -1021,7 +1022,7 @@ function enhanceCodeBlocks(bubble) {
   });
 }
 
-function appendMessage(role, content = "", { id, index, skipActions, isLast } = {}) {
+function appendMessage(role, content = "", { id, index, skipActions, isLast, route } = {}) {
   // Clear empty-state placeholder if present.
   const emptyState = messagesEl.querySelector(".empty-state");
   if (emptyState) emptyState.remove();
@@ -1039,6 +1040,7 @@ function appendMessage(role, content = "", { id, index, skipActions, isLast } = 
   } else {
     bubble.textContent = content;
   }
+  if (role === "assistant") appendMessageRoute(wrapper, route);
   wrapper.appendChild(bubble);
 
   // Per-message actions (edit on user, regenerate on last assistant).
@@ -1050,6 +1052,51 @@ function appendMessage(role, content = "", { id, index, skipActions, isLast } = 
   messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return bubble;
+}
+
+function appendMessageRoute(wrapper, route) {
+  const label = formatMessageRoute(route);
+  if (!label) return;
+  const el = document.createElement("div");
+  el.className = "message-route";
+  el.textContent = label;
+  el.title = `Response route: ${label}`;
+  wrapper.appendChild(el);
+}
+
+function setMessageRoute(bubble, route) {
+  const wrapper = bubble?.parentElement;
+  if (!wrapper) return;
+  const label = formatMessageRoute(route);
+  if (!label) return;
+  let el = Array.from(wrapper.children).find((child) => child.classList.contains("message-route"));
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "message-route";
+    wrapper.insertBefore(el, bubble);
+  }
+  el.textContent = label;
+  el.title = `Response route: ${label}`;
+}
+
+function formatMessageRoute(route = {}) {
+  const backendName = route.backend_name || route.backendName;
+  const modelName = route.model;
+  const status = readableModelStatus(route.model_status || route.modelStatus);
+  if (!backendName && !modelName && !status) return "";
+
+  const parts = [];
+  if (backendName) parts.push(`via ${backendName}`);
+  if (modelName) parts.push(modelName);
+  if (status) parts.push(status);
+  return parts.join(" - ");
+}
+
+function readableModelStatus(status) {
+  if (!status) return "";
+  if (status === "resident") return "resident";
+  if (status === "loading") return "loaded on demand";
+  return String(status).replaceAll("_", " ");
 }
 
 function makeMessageActions(role, wrapper, { isLast } = {}) {
@@ -1199,6 +1246,7 @@ async function runChatStream({ regenerate }) {
   let assistantContent = "";
   let aborted = false;
   let statusEl = null;
+  let assistantRoute = null;
 
   try {
     const body = {
@@ -1234,6 +1282,12 @@ async function runChatStream({ regenerate }) {
 
     const backendName = res.headers.get("X-LLM-Backend");
     const modelStatus = res.headers.get("X-LLM-Model-Status");
+    assistantRoute = {
+      model,
+      backend_name: backendName,
+      model_status: modelStatus || (res.headers.get("X-LLM-Model-Loaded") === "true" ? "resident" : ""),
+    };
+    setMessageRoute(bubble, assistantRoute);
     if (modelStatus === "loading") {
       statusEl = document.createElement("span");
       statusEl.className = "stream-status";
@@ -1272,7 +1326,7 @@ async function runChatStream({ regenerate }) {
     cursor.remove();
     if (assistantContent) {
       enhanceCodeBlocks(bubble);
-      messages.push({ role: "assistant", content: assistantContent });
+      messages.push({ role: "assistant", content: assistantContent, ...(assistantRoute || {}) });
     } else if (aborted) {
       bubble.textContent = "[stopped]";
     }

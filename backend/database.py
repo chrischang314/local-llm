@@ -42,6 +42,9 @@ _NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("github_installations", "access_token_encrypted", "TEXT"),
     ("github_installations", "token_scope", "TEXT"),
     ("github_installations", "token_type", "TEXT"),
+    ("messages", "model", "TEXT"),
+    ("messages", "backend_name", "TEXT"),
+    ("messages", "model_status", "TEXT"),
 ]
 
 

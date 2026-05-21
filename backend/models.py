@@ -60,6 +60,9 @@ class Message(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id"))
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    model = Column(String, nullable=True)
+    backend_name = Column(String, nullable=True)
+    model_status = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     conversation = relationship("Conversation", back_populates="messages")
 
