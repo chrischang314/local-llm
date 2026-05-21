@@ -374,8 +374,8 @@ function getAgentDisabledReason() {
 
 function getGithubSetupMessage() {
   const missing = githubStatus?.missing || [];
-  if (!missing.length) return "Enter GitHub OAuth settings, then sign in.";
-  return `Enter ${missing.join(" and ")} above, save, then sign in with GitHub.`;
+  if (!missing.length) return "Sign in with GitHub before running code changes.";
+  return `GitHub service OAuth setup is required: ${missing.join(", ")}.`;
 }
 
 async function refreshGithubStatus() {
@@ -398,28 +398,25 @@ function renderGithubStatus() {
   const text = connected
     ? `Connected to ${installation?.account_login || "GitHub"}`
     : configured
-      ? "GitHub OAuth ready to sign in"
-      : `GitHub OAuth not configured.${missing}`;
+      ? "GitHub OAuth ready. Sign in with GitHub to authorize this browser."
+      : `GitHub OAuth service setup required.${missing}`;
 
   if (githubStatusText) githubStatusText.textContent = text;
   if (settingsGithubStatus) settingsGithubStatus.textContent = text;
   if (githubOauthCallbackUrl && githubStatus?.oauth?.callback_url) {
     githubOauthCallbackUrl.value = githubStatus.oauth.callback_url;
   }
-  if (githubOauthClientId && githubStatus?.oauth?.client_id && !githubOauthClientId.value) {
-    githubOauthClientId.value = githubStatus.oauth.client_id;
-  }
   if (githubOauthSetup) {
-    githubOauthSetup.classList.toggle("connected", connected);
+    githubOauthSetup.classList.toggle("hidden", configured);
   }
   [githubConnectBtn, settingsGithubConnect].forEach((button) => {
     if (!button) return;
-    button.disabled = false;
+    button.disabled = !configured;
     button.querySelector("span").textContent = connected
-      ? "Reconnect"
+      ? "Reconnect GitHub"
       : configured
         ? "Sign in with GitHub"
-        : "Save keys and sign in";
+        : "GitHub setup required";
   });
 }
 
@@ -428,19 +425,19 @@ async function saveGithubOAuthConfig({ silent = false } = {}) {
   const clientSecret = githubOauthClientSecret?.value.trim() || "";
   if (!clientId || (!clientSecret && !githubStatus?.oauth?.configured)) {
     if (!silent && githubOauthConfigStatus) {
-      githubOauthConfigStatus.textContent = "Client ID and Client Secret are required before GitHub sign-in.";
+      githubOauthConfigStatus.textContent = "Client ID and Client Secret are required for the one-time service setup.";
     }
     return false;
   }
   try {
-    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "Saving GitHub OAuth settings...";
+    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "Saving GitHub OAuth App...";
     await apiJson("/github/oauth/config", {
       method: "POST",
       body: JSON.stringify({ client_id: clientId, client_secret: clientSecret || null }),
     });
     if (githubOauthClientSecret) githubOauthClientSecret.value = "";
     await refreshGithubStatus();
-    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "GitHub OAuth settings saved.";
+    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "GitHub OAuth App saved. Users can now sign in with GitHub.";
     return true;
   } catch (err) {
     if (githubOauthConfigStatus) githubOauthConfigStatus.textContent = err.message;
@@ -452,11 +449,8 @@ async function saveGithubOAuthConfig({ silent = false } = {}) {
 async function startGithubInstall() {
   try {
     if (!githubStatus?.configured) {
-      const saved = await saveGithubOAuthConfig({ silent: true });
-      if (!saved) {
-        alert(getGithubSetupMessage());
-        return;
-      }
+      alert(getGithubSetupMessage());
+      return;
     }
     const data = await apiJson("/github/oauth/start", { method: "POST" });
     if (!data.configured || !data.auth_url) {

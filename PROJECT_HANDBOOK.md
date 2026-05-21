@@ -66,13 +66,15 @@ and diff artifacts in SQLite. The frontend talks to `/github/*` for installation
 status, repository listing, and branch lookup, then `/agent/*` for create/list,
 detail, SSE events, cancellation, and diff retrieval.
 
-The intended authorization path is GitHub OAuth configured from the website. A
-user enters the OAuth App Client ID and Client Secret in Code mode, the backend
-stores them encrypted in SQLite, and the Sign in button redirects through
-GitHub. The legacy GitHub App installation path is still present for deployments
-that prefer installation tokens. A temporary `GITHUB_BYPASS_TOKEN` escape hatch
-exists only for controlled LAN smoke tests against disposable repositories and
-should not replace the OAuth flow for normal use.
+The intended authorization path is service-configured GitHub OAuth. A Local LLM
+operator enters the OAuth App Client ID and Client Secret once in Code mode; the
+backend stores them encrypted in SQLite. After that, each Local LLM user clicks
+the Sign in with GitHub button, authorizes on github.com, and returns through
+the callback with their own encrypted GitHub token. The legacy GitHub App
+installation path is still present for deployments that prefer installation
+tokens. A temporary `GITHUB_BYPASS_TOKEN` escape hatch exists only for
+controlled LAN smoke tests against disposable repositories and should not replace
+the OAuth flow for normal use.
 
 The execution path is:
 

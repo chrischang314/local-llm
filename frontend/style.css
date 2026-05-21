@@ -1128,6 +1128,10 @@ svg {
   border-color: #aadbd4;
 }
 
+.github-oauth-setup.hidden {
+  display: none;
+}
+
 .code-job-form label,
 .github-oauth-setup label {
   min-width: 0;

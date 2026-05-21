@@ -188,9 +188,9 @@ data: [DONE]</code></pre>
         <p>
           Code mode in the main workspace uses authenticated same-origin API routes. Live execution
           stays disabled until the Kubernetes sandbox canaries pass and
-          <code>AGENT_JOBS_ENABLED=true</code> is set. GitHub sign-in is configured
-          from the site with a GitHub OAuth App Client ID and Client Secret, then
-          the Connect button redirects to GitHub. The agent tool loop can read,
+          <code>AGENT_JOBS_ENABLED=true</code> is set. A GitHub OAuth App is
+          configured once from the site, then each user clicks Sign in with
+          GitHub and authorizes on github.com. The agent tool loop can read,
           search, write, inspect diffs, and run bounded shell commands in the
           isolated workspace. Code jobs use an implementation subagent, reviewer
           subagent, testing agent, and revision subagent, with bounded review/test
@@ -207,7 +207,7 @@ data: [DONE]</code></pre>
           <span class="method post">POST</span>
           <span class="path">/github/oauth/config</span>
         </div>
-        <p>Saves the user-supplied GitHub OAuth Client ID and Client Secret encrypted in SQLite.</p>
+        <p>Saves the service GitHub OAuth Client ID and Client Secret encrypted in SQLite.</p>
 
         <div class="endpoint">
           <span class="method post">POST</span>

@@ -20,11 +20,12 @@
 - `llama3.2:3b` is installed on CHRIS-PC-1 and was verified with a direct
   generate request from inside the Kubernetes backend pod.
 - A gated Code mode now exists in the main workspace for GitHub-backed code
-  execution. The normal connection path is site-configured GitHub OAuth: users
-  paste OAuth Client ID/Secret into Code mode, save them encrypted in SQLite,
-  then click Sign in with GitHub for a real GitHub redirect. The backend exposes
-  `/github/*` and `/agent/*`, nginx proxies both prefixes, and the runner image
-  lives in `agent-runner/`.
+  execution. The normal connection path is service-configured GitHub OAuth: one
+  Local LLM operator saves the OAuth App Client ID/Secret in Code mode, then
+  every Local LLM user clicks **Sign in with GitHub** for the GitHub authorize
+  redirect and gets their own encrypted token. The backend exposes `/github/*`
+  and `/agent/*`, nginx proxies both prefixes, and the runner image lives in
+  `agent-runner/`.
 - `AGENT_JOBS_ENABLED` should remain `false` until the live
   `local-llm-sandbox` NetworkPolicy and canary checks pass. The UI will show the
   feature as disabled but still lets users inspect GitHub connection state,
@@ -38,8 +39,9 @@
 - Do not commit GitHub OAuth Client Secrets, OAuth access tokens,
   `GITHUB_APP_PRIVATE_KEY`, GitHub installation tokens, `AGENT_SECRET_KEY`,
   webhook secrets, kube service-account tokens, or runner callback payloads that
-  contain secrets. OAuth app credentials are user-supplied through the site and
-  encrypted in SQLite.
+  contain secrets. The service OAuth app credentials live in
+  `github_oauth_service_configs` and are encrypted in SQLite; per-user GitHub
+  access tokens live in `github_installations`.
 - `GITHUB_BYPASS_TOKEN` / `GITHUB_BYPASS_TOKEN_FILE` is a temporary live-test
   escape hatch for disposable repositories when no GitHub App exists. Do not use
   it as the normal authorization model and remove the Secret/env after testing.

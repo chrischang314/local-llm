@@ -88,6 +88,7 @@ class GitHubAppClient:
                 "scope": "repo",
                 "state": state,
                 "allow_signup": "true",
+                "prompt": "select_account",
             }
         )
         return f"{GITHUB_WEB}/login/oauth/authorize?{params}"

@@ -17,7 +17,7 @@ from agent_services import utcnow
 from auth import current_user_id
 from database import get_db
 from github_client import github_app_client
-from models import GitHubInstallation, GitHubInstallState, GitHubOAuthConfig
+from models import GitHubInstallation, GitHubInstallState, GitHubOAuthConfig, GitHubOAuthServiceConfig
 from secret_store import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -71,18 +71,41 @@ async def current_installation(db: AsyncSession, user_id: int) -> GitHubInstalla
     return result.scalars().first()
 
 
-async def current_oauth_config(db: AsyncSession, user_id: int) -> GitHubOAuthConfig | None:
+async def current_oauth_config(db: AsyncSession) -> GitHubOAuthServiceConfig | None:
     result = await db.execute(
-        select(GitHubOAuthConfig).where(GitHubOAuthConfig.user_id == user_id)
+        select(GitHubOAuthServiceConfig).order_by(GitHubOAuthServiceConfig.updated_at.desc())
     )
-    return result.scalars().first()
+    config = result.scalars().first()
+    if config:
+        return config
+
+    # Migration bridge for the previous UI that stored the OAuth App credentials
+    # per Local LLM user. Promote the most recent row to the service-wide config
+    # so existing deployments do not lose a configured OAuth App.
+    legacy = (
+        await db.execute(select(GitHubOAuthConfig).order_by(GitHubOAuthConfig.updated_at.desc()))
+    ).scalars().first()
+    if not legacy:
+        return None
+    config = GitHubOAuthServiceConfig(
+        id=1,
+        client_id=legacy.client_id,
+        client_secret_encrypted=legacy.client_secret_encrypted,
+        created_by_user_id=legacy.user_id,
+        updated_by_user_id=legacy.user_id,
+    )
+    db.add(config)
+    await db.commit()
+    await db.refresh(config)
+    return config
 
 
-def _serialize_oauth_config(config: GitHubOAuthConfig | None, request: Request) -> dict:
+def _serialize_oauth_config(config: GitHubOAuthServiceConfig | None, request: Request) -> dict:
     return {
         "configured": config is not None,
-        "client_id": config.client_id if config else "",
+        "client_id_configured": bool(config and config.client_id),
         "callback_url": str(request.url_for("github_oauth_callback")),
+        "updated_at": config.updated_at.isoformat() if config and config.updated_at else None,
     }
 
 
@@ -113,7 +136,7 @@ async def github_status(
     db: AsyncSession = Depends(get_db),
 ):
     app_config = github_app_client.config()
-    oauth_config = await current_oauth_config(db, user_id)
+    oauth_config = await current_oauth_config(db)
     installation = await current_installation(db, user_id)
     bypass_configured = github_app_client.bypass_token_configured()
     oauth_configured = oauth_config is not None
@@ -145,24 +168,27 @@ async def save_github_oauth_config(
 ):
     client_id = request_body.client_id.strip()
     client_secret = (request_body.client_secret or "").strip()
-    config = await current_oauth_config(db, user_id)
+    config = await current_oauth_config(db)
     if not config and not client_secret:
         raise HTTPException(status_code=400, detail="GitHub OAuth Client Secret is required")
     if not config:
-        config = GitHubOAuthConfig(
-            user_id=user_id,
+        config = GitHubOAuthServiceConfig(
+            id=1,
             client_id=client_id,
             client_secret_encrypted=encrypt_secret(client_secret),
+            created_by_user_id=user_id,
+            updated_by_user_id=user_id,
         )
         db.add(config)
     else:
         config.client_id = client_id
         if client_secret:
             config.client_secret_encrypted = encrypt_secret(client_secret)
+        config.updated_by_user_id = user_id
         config.updated_at = utcnow()
     await db.commit()
     await db.refresh(config)
-    return {"oauth": _serialize_oauth_config(config, request)}
+    return {"configured": True, "oauth": _serialize_oauth_config(config, request)}
 
 
 @router.post("/oauth/start")
@@ -171,7 +197,7 @@ async def start_github_oauth(
     user_id: int = Depends(current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    config = await current_oauth_config(db, user_id)
+    config = await current_oauth_config(db)
     if not config:
         return {
             "configured": False,
@@ -223,7 +249,7 @@ async def github_oauth_callback(
     if not state_row or state_row.consumed or not expires_at or expires_at < utcnow():
         return RedirectResponse(f"{frontend_url}/?github_oauth=error&message=Expired%20GitHub%20OAuth%20state", status_code=303)
 
-    config = await current_oauth_config(db, state_row.user_id)
+    config = await current_oauth_config(db)
     if not config:
         return RedirectResponse(f"{frontend_url}/?github_oauth=error&message=GitHub%20OAuth%20is%20not%20configured", status_code=303)
 

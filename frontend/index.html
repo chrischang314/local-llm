@@ -166,17 +166,18 @@
             </div>
             <button id="github-connect-btn" class="inline-action" type="button">
               <i data-lucide="github" aria-hidden="true"></i>
-              <span>Connect</span>
+              <span>Sign in with GitHub</span>
             </button>
           </div>
 
-          <div id="github-oauth-setup" class="github-oauth-setup">
+          <div id="github-oauth-setup" class="github-oauth-setup hidden">
+            <p class="hint">One-time service setup. After this is saved, every Local LLM user can sign in with GitHub from the button above.</p>
             <div class="job-field-grid oauth-field-grid">
               <label>OAuth Client ID
-                <input id="github-oauth-client-id" type="text" autocomplete="off" placeholder="GitHub OAuth App client ID" />
+                <input id="github-oauth-client-id" type="text" autocomplete="off" placeholder="GitHub OAuth Client ID" />
               </label>
               <label>OAuth Client Secret
-                <input id="github-oauth-client-secret" type="password" autocomplete="off" placeholder="Paste to update" />
+                <input id="github-oauth-client-secret" type="password" autocomplete="off" placeholder="GitHub OAuth Client Secret" />
               </label>
             </div>
             <div class="repo-search-row">
@@ -186,7 +187,7 @@
                 <span>Save</span>
               </button>
             </div>
-            <p id="github-oauth-config-status" class="hint">Use this callback URL in the GitHub OAuth App, then sign in.</p>
+            <p id="github-oauth-config-status" class="hint">Use this callback URL in the GitHub OAuth App, then save the service credentials once.</p>
           </div>
 
           <form id="code-job-form" class="code-job-form">
@@ -335,6 +336,6 @@
       lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
     }
   </script>
-  <script src="app.js?v=20260521-github-oauth"></script>
+  <script src="app.js?v=20260521-service-github-oauth"></script>
 </body>
 </html>

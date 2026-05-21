@@ -54,12 +54,14 @@ The main workspace includes a gated Code mode for authenticated users. It can
 connect to GitHub from the website, list authorized repositories and branches,
 and queue agentic coding jobs that run inside isolated Kubernetes Jobs.
 
-The normal connection path is GitHub OAuth. In Code mode, paste a GitHub OAuth
-App Client ID and Client Secret into the GitHub setup fields, use the displayed
-callback URL (`http://localllm.lan/github/oauth/callback` on the LAN deployment)
-in the OAuth App, then click **Sign in with GitHub**. The backend stores those
-user-supplied values encrypted in SQLite; GitHub credentials no longer need to
-be injected through backend env vars for the normal redirect flow.
+The normal connection path is GitHub OAuth. Configure one service OAuth App in
+Code mode using the displayed callback URL
+(`http://localllm.lan/github/oauth/callback` on the LAN deployment). Local LLM
+stores that Client ID and Client Secret encrypted in SQLite. After that, every
+Local LLM user gets a normal **Sign in with GitHub** button: it redirects to
+github.com, the user authorizes there, and the callback stores that user's
+encrypted GitHub token for repository access. End users do not paste OAuth app
+keys.
 
 Live code execution is disabled by default. Enable it only after the sandbox
 namespace, NetworkPolicy enforcement, and canary tests pass:

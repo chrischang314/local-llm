@@ -106,6 +106,17 @@ class GitHubOAuthConfig(Base):
     user = relationship("User", back_populates="github_oauth_configs")
 
 
+class GitHubOAuthServiceConfig(Base):
+    __tablename__ = "github_oauth_service_configs"
+    id = Column(Integer, primary_key=True, default=1)
+    client_id = Column(String, nullable=False)
+    client_secret_encrypted = Column(Text, nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
+
+
 class AgentJob(Base):
     __tablename__ = "agent_jobs"
     id = Column(String, primary_key=True)

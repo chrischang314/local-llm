@@ -7,6 +7,9 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
@@ -18,7 +21,8 @@ import agent_services  # noqa: E402
 import github_client  # noqa: E402
 import github_routes  # noqa: E402
 import secret_store  # noqa: E402
-from models import AgentJob, GitHubInstallation  # noqa: E402
+from database import Base  # noqa: E402
+from models import AgentJob, GitHubInstallation, GitHubOAuthConfig, GitHubOAuthServiceConfig, User  # noqa: E402
 
 
 class AgentServiceTests(unittest.TestCase):
@@ -320,6 +324,34 @@ class GitHubOAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("redirect_uri=http%3A%2F%2Flocalllm.lan%2Fgithub%2Foauth%2Fcallback", url)
         self.assertIn("scope=repo", url)
         self.assertIn("state=state-abc", url)
+        self.assertIn("prompt=select_account", url)
+
+    async def test_legacy_user_oauth_config_promotes_to_service_config(self):
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as db:
+            db.add(User(id=1, username="setup-user", password_hash="hash"))
+            db.add(
+                GitHubOAuthConfig(
+                    user_id=1,
+                    client_id="client-123",
+                    client_secret_encrypted=secret_store.encrypt_secret("secret-123"),
+                )
+            )
+            await db.commit()
+
+        async with session_factory() as db:
+            config = await github_routes.current_oauth_config(db)
+            self.assertIsInstance(config, GitHubOAuthServiceConfig)
+            self.assertEqual(config.client_id, "client-123")
+
+        await engine.dispose()
 
     async def test_user_supplied_oauth_token_is_encrypted_and_reusable_for_runner(self):
         encrypted = secret_store.encrypt_secret("gho_test_token_value")
