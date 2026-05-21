@@ -111,3 +111,13 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
   workspace mode, removes the old sidebar Code Jobs button, keeps GitHub setup
   clickable when backend secrets are missing, and keeps Run Code Change disabled
   until the GitHub App and sandbox gates are satisfied.
+- Live GitHub job E2E on 2026-05-21 used temporary `GITHUB_BYPASS_TOKEN`
+  wiring against disposable repo `chrischang314/local-llm-agent-e2e`, branch
+  `e2e-20260520-230509`. Job `6ed523aa62f3486dbdd4096e7f98e1c6` ran model
+  `qwen2.5-coder:7b`, wrote `subtract(a, b)`, passed
+  `python -m unittest discover -s tests` in the runner pod, and pushed commit
+  `e7f7543f8b1e64936411ebfa0d29127075d450be` directly to that branch.
+- After that live proof, the sandbox job was deleted, Secret
+  `local-llm-agent-bypass` was deleted, backend env was reset to
+  `AGENT_JOBS_ENABLED=false`, the backend rolled out successfully, and
+  `http://localllm.lan/health` still returned `backend=ok` and `ollama=ok`.
