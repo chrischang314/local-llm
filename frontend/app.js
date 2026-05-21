@@ -439,8 +439,8 @@ async function saveGithubOAuthConfig({ silent = false } = {}) {
       body: JSON.stringify({ client_id: clientId, client_secret: clientSecret || null }),
     });
     if (githubOauthClientSecret) githubOauthClientSecret.value = "";
-    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "GitHub OAuth settings saved.";
     await refreshGithubStatus();
+    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "GitHub OAuth settings saved.";
     return true;
   } catch (err) {
     if (githubOauthConfigStatus) githubOauthConfigStatus.textContent = err.message;
