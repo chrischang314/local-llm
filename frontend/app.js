@@ -416,7 +416,7 @@ function renderGithubStatus() {
       ? "Reconnect GitHub"
       : configured
         ? "Sign in with GitHub"
-        : "GitHub setup required";
+        : "Sign in with GitHub";
   });
 }
 
