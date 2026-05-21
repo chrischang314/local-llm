@@ -32,6 +32,7 @@ MAX_IMPLEMENTER_ITERATIONS = 12
 MAX_REVISION_ITERATIONS = 8
 MAX_REVIEW_CYCLES = 3
 MAX_REVIEW_DIFF = 120_000
+MAX_SHELL_COMMAND_LENGTH = 800
 
 SECRET_KEYS = ("GITHUB_TOKEN", "AGENT_CALLBACK_TOKEN", "AGENT_SECRET")
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", ".mypy_cache", ".pytest_cache", "__pycache__"}
@@ -323,7 +324,13 @@ def write_file(path: str, content: str) -> str:
 
 
 def run_shell(command: str) -> str:
-    return "[refused: arbitrary shell is disabled in the agent tool loop]"
+    command = command.strip()
+    if not command:
+        return "[refused: empty shell command]"
+    if len(command) > MAX_SHELL_COMMAND_LENGTH:
+        return "[refused: shell command is too long]"
+    result = run(command, shell=True, timeout=MAX_COMMAND_SECONDS)
+    return trim(f"exit={result.returncode}\n{redact(result.stdout)}")
 
 
 def diff() -> str:
@@ -390,6 +397,20 @@ def call_llm(messages: list[dict[str, str]]) -> str:
     return data["choices"][0]["message"]["content"]
 
 
+def describe_action(name: str, args: dict[str, Any]) -> str:
+    if name in {"list_files", "read_file"}:
+        return f"{name} {args.get('path', '.')}"
+    if name == "search":
+        return f"search {str(args.get('query', ''))[:80]}"
+    if name == "write_file":
+        return f"write_file {args.get('path', '')}"
+    if name == "run_shell":
+        return f"run_shell {str(args.get('command', ''))[:120]}"
+    if name == "finish":
+        return "finish"
+    return name or "[missing action]"
+
+
 def request_github_token() -> str:
     request = urllib.request.Request(
         f"{CALLBACK_URL}/github-token",
@@ -422,13 +443,20 @@ def run_tool_loop(role: str, assignment: str, *, max_iterations: int) -> str:
         f"You are the {role} subagent for a Local LLM code job running inside an isolated Kubernetes Job. "
         "Respond with exactly one JSON object per turn. Available actions are: "
         "list_files {path}, read_file {path}, search {query}, write_file {path, content}, "
-        "inspect_diff {}, finish {summary}. "
+        "run_shell {command}, inspect_diff {}, finish {summary}. "
         "Only modify files that are necessary for the task. Prefer reading before writing. "
-        "Do not write outside the repository. Shell commands are not available. "
-        "Leave concise, maintainable changes that another reviewer can inspect."
+        "Do not write outside the repository. Shell commands run inside the isolated repository workspace "
+        "with a short timeout. If the task asks for tests to pass, inspect the relevant tests and use "
+        "run_shell for the configured test command when useful. Do not finish until you have inspected "
+        "the diff, unless you are certain no file change is needed. Leave concise, maintainable changes "
+        "that another reviewer can inspect."
     )
+    repo_snapshot = trim(list_files("."), 12_000)
+    diff_snapshot = trim(diff(), 12_000)
     user = (
         f"{base_task_context()}\n\n"
+        f"Current repository files:\n{repo_snapshot}\n\n"
+        f"Current diff:\n{diff_snapshot}\n\n"
         f"Assignment for this subagent:\n{assignment}\n\n"
         "Begin by inspecting the repository or current diff before editing."
     )
@@ -437,16 +465,26 @@ def run_tool_loop(role: str, assignment: str, *, max_iterations: int) -> str:
 
     for iteration in range(1, max_iterations + 1):
         log(f"{role.capitalize()} subagent iteration {iteration}/{max_iterations}.")
+        raw_response = ""
         try:
-            action = parse_action(call_llm(messages))
+            raw_response = call_llm(messages)
+            action = parse_action(raw_response)
         except Exception as exc:  # noqa: BLE001
-            observation = f"[invalid model action: {exc}]"
+            snippet = trim(raw_response.replace("\r", ""), 800) if raw_response else "[empty response]"
+            log(f"{role.capitalize()} returned invalid action: {exc}. Snippet: {snippet}", level="warning")
+            observation = (
+                f"[invalid model action: {exc}. Return exactly one JSON object using an available action. "
+                f"Last response was: {snippet}]"
+            )
             messages.append({"role": "assistant", "content": json.dumps({"action": "invalid"})})
             messages.append({"role": "user", "content": observation})
             continue
 
         name = str(action.get("action", "")).strip()
         args = action.get("args") or {}
+        if not isinstance(args, dict):
+            args = {}
+        log(f"{role.capitalize()} action: {describe_action(name, args)}")
         messages.append({"role": "assistant", "content": json.dumps(action)})
 
         try:
@@ -468,10 +506,17 @@ def run_tool_loop(role: str, assignment: str, *, max_iterations: int) -> str:
                 return final_summary
             else:
                 observation = f"[unknown action: {name}]"
+                log(f"{role.capitalize()} returned unknown action: {name}", level="warning")
         except Exception as exc:  # noqa: BLE001
             observation = f"[tool error: {exc}]"
 
-        messages.append({"role": "user", "content": trim(observation)})
+        messages.append({
+            "role": "user",
+            "content": (
+                f"Observation:\n{trim(observation)}\n\n"
+                "Next respond with exactly one JSON object using an available action."
+            ),
+        })
 
     log(final_summary, level="warning")
     return final_summary
@@ -480,7 +525,12 @@ def run_tool_loop(role: str, assignment: str, *, max_iterations: int) -> str:
 def reviewer_agent(cycle: int) -> AgentDecision:
     current_diff = diff()
     if current_diff.strip() == "[no diff]":
-        return AgentDecision(False, "No file changes are present.", ["No diff to review."])
+        issues = ["No diff to review."]
+        if TEST_COMMAND.strip():
+            log("No diff is present; running configured tests to provide revision context.", level="warning")
+            result = run(TEST_COMMAND, shell=True, timeout=MAX_TEST_SECONDS)
+            issues.append(trim(f"Configured tests currently exit {result.returncode}:\n{redact(result.stdout)}", 8_000))
+        return AgentDecision(False, "No file changes are present.", issues)
     system = (
         "You are a strict reviewer subagent for a Local LLM code job. "
         "Review the current diff for correctness, maintainability, focused scope, safety, and testability. "

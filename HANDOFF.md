@@ -49,9 +49,12 @@
   the global secret. The initial clone token is used only for clone; after tests
   pass, the runner asks the backend for a fresh short-lived installation token
   for push/PR work.
-- The model tool loop must not get arbitrary shell access. It can list, read,
-  search, write, inspect diff, and finish. Only the configured test command runs
-  as a shell command.
+- The model tool loop can list, read, search, write, inspect diff, run bounded
+  shell commands inside the isolated repository workspace, and finish. Secrets
+  are removed from the runner environment before shell commands execute.
+- If the reviewer sees no diff, the runner now executes the configured test
+  command once and passes the failing output to the revision subagent. This keeps
+  no-op jobs from looping without actionable context.
 - `GITHUB_ALLOWED_INSTALLATION_IDS` is required before live job creation. Keep it
   in the backend Kubernetes Secret as a comma-separated list of installation ids
   that this LAN deployment is allowed to use.

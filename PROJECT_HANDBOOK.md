@@ -78,12 +78,15 @@ The execution path is:
    Kubernetes Job in `local-llm-sandbox`.
 3. Runner clones the repository and creates an `agent/<job-id>` branch.
 4. An implementation subagent uses the local OpenAI-compatible API for a bounded
-   read/search/write/inspect-diff tool loop.
+   read/search/write/run-shell/inspect-diff tool loop inside the isolated
+   repository workspace.
 5. A reviewer subagent inspects the diff for correctness, maintainability,
    focused scope, safety, and testability.
-6. A testing agent runs the configured test command. Reviewer or test failures
-   are sent to a revision subagent, and the review/test cycle repeats up to
-   three times before the job fails.
+6. A testing agent runs the configured test command. If review finds no diff,
+   the runner first executes the configured test command once and passes that
+   failure output to the revision subagent. Reviewer or test failures are sent
+   to a revision subagent, and the review/test cycle repeats up to three times
+   before the job fails.
 7. After the reviewer and testing gates are satisfied, the runner commits the
    final changes, requests a fresh push token, rebases, and pushes only after
    tests pass.

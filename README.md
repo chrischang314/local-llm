@@ -93,12 +93,14 @@ branch, then runs a bounded multi-agent quality loop:
 4. a revision subagent fixes reviewer or test failures, repeating up to three
    review/test cycles.
 
-The model tool loop can read/search/write files and inspect diffs; arbitrary
-shell commands are disabled. The runner requests a fresh installation token for
-push/PR operations only after the reviewer and testing gates are satisfied. If
-the branch is protected or the push diverges, the runner pushes the agent branch
-and creates a PR instead. If no test command is supplied, it must not update the
-base branch.
+The model tool loop can read/search/write files, inspect diffs, and run bounded
+shell commands inside the isolated repository workspace. If no diff is present,
+the reviewer step runs the configured test command once to give the revision
+subagent concrete failure output. The runner requests a fresh installation token
+for push/PR operations only after the reviewer and testing gates are satisfied.
+If the branch is protected or the push diverges, the runner pushes the agent
+branch and creates a PR instead. If no test command is supplied, it must not
+update the base branch.
 
 ## Login Persistence
 

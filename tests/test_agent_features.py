@@ -157,6 +157,35 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertFalse(runner.tester_agent(failing).approved)
         self.assertFalse(runner.tester_agent(missing).approved)
 
+    def test_runner_allows_bounded_shell_commands_inside_workspace(self):
+        runner = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner.REPO_DIR = pathlib.Path(tmp)
+            output = runner.run_shell(f'"{sys.executable}" -c "print(123)"')
+
+        self.assertIn("exit=0", output)
+        self.assertIn("123", output)
+
+    def test_reviewer_empty_diff_includes_test_failure_context(self):
+        runner = load_runner_module()
+
+        class Completed:
+            returncode = 7
+            stdout = "ImportError: cannot import name 'subtract'"
+
+        runner.diff = lambda: "[no diff]"
+        runner.TEST_COMMAND = "python -m unittest discover -s tests"
+        runner.run = lambda *args, **kwargs: Completed()
+        runner.log = lambda *args, **kwargs: None
+
+        decision = runner.reviewer_agent(1)
+
+        self.assertFalse(decision.approved)
+        self.assertIn("No diff to review.", decision.issues)
+        self.assertTrue(any("exit 7" in issue for issue in decision.issues))
+        self.assertTrue(any("subtract" in issue for issue in decision.issues))
+
     def test_runner_quality_loop_revises_until_review_and_tests_pass(self):
         runner = load_runner_module()
         steps = []
