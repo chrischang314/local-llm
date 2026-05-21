@@ -19,23 +19,27 @@
   Windows session.
 - `llama3.2:3b` is installed on CHRIS-PC-1 and was verified with a direct
   generate request from inside the Kubernetes backend pod.
-- A gated Code mode now exists in the main workspace for GitHub App-backed code
-  execution. The backend exposes `/github/*` and `/agent/*`, nginx proxies both
-  prefixes, and the runner image lives in `agent-runner/`.
+- A gated Code mode now exists in the main workspace for GitHub-backed code
+  execution. The normal connection path is site-configured GitHub OAuth: users
+  paste OAuth Client ID/Secret into Code mode, save them encrypted in SQLite,
+  then click Sign in with GitHub for a real GitHub redirect. The backend exposes
+  `/github/*` and `/agent/*`, nginx proxies both prefixes, and the runner image
+  lives in `agent-runner/`.
 - `AGENT_JOBS_ENABLED` should remain `false` until the live
   `local-llm-sandbox` NetworkPolicy and canary checks pass. The UI will show the
-  feature as disabled but still lets users inspect GitHub connection state and
-  click the setup button to see the missing GitHub App settings.
+  feature as disabled but still lets users inspect GitHub connection state,
+  enter OAuth keys, and complete GitHub sign-in.
 
 ## Safe Continuation Notes
 
 - Do not commit kubeconfigs, service-account tokens, SSH keys, Docker auth
   files, anything under `.docker-worker/`, or any generated `data/jwt_secret`
   file.
-- Do not commit `GITHUB_APP_PRIVATE_KEY`, GitHub installation tokens,
-  `AGENT_SECRET_KEY`, webhook secrets, kube service-account tokens, or runner
-  callback payloads that contain secrets. Use Kubernetes Secrets for live
-  deployment.
+- Do not commit GitHub OAuth Client Secrets, OAuth access tokens,
+  `GITHUB_APP_PRIVATE_KEY`, GitHub installation tokens, `AGENT_SECRET_KEY`,
+  webhook secrets, kube service-account tokens, or runner callback payloads that
+  contain secrets. OAuth app credentials are user-supplied through the site and
+  encrypted in SQLite.
 - `GITHUB_BYPASS_TOKEN` / `GITHUB_BYPASS_TOKEN_FILE` is a temporary live-test
   escape hatch for disposable repositories when no GitHub App exists. Do not use
   it as the normal authorization model and remove the Secret/env after testing.
@@ -47,17 +51,17 @@
   failures can trigger up to three review/test cycles before the job fails.
 - Runners receive a per-job callback token derived from `AGENT_SECRET_KEY`, not
   the global secret. The initial clone token is used only for clone; after tests
-  pass, the runner asks the backend for a fresh short-lived installation token
-  for push/PR work.
+  pass, the runner asks the backend for a fresh repository access token for
+  push/PR work.
 - The model tool loop can list, read, search, write, inspect diff, run bounded
   shell commands inside the isolated repository workspace, and finish. Secrets
   are removed from the runner environment before shell commands execute.
 - If the reviewer sees no diff, the runner now executes the configured test
   command once and passes the failing output to the revision subagent. This keeps
   no-op jobs from looping without actionable context.
-- `GITHUB_ALLOWED_INSTALLATION_IDS` is required before live job creation. Keep it
-  in the backend Kubernetes Secret as a comma-separated list of installation ids
-  that this LAN deployment is allowed to use.
+- `GITHUB_ALLOWED_INSTALLATION_IDS` is required only for the legacy GitHub App
+  path. OAuth-connected users do not need GitHub App env vars or the install-id
+  allowlist.
 - If an existing browser token was signed before this persistence change, the
   user may need to sign in once after deployment. New tokens should survive tab
   closes and backend restarts until logout or token expiry.
@@ -109,8 +113,8 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
   egress proxy is added.
 - Live UI smoke on 2026-05-21 verified `localllm.lan` exposes Code as a main
   workspace mode, removes the old sidebar Code Jobs button, keeps GitHub setup
-  clickable when backend secrets are missing, and keeps Run Code Change disabled
-  until the GitHub App and sandbox gates are satisfied.
+  clickable, and keeps Run Code Change disabled until GitHub sign-in and sandbox
+  gates are satisfied.
 - Live GitHub job E2E on 2026-05-21 used temporary `GITHUB_BYPASS_TOKEN`
   wiring against disposable repo `chrischang314/local-llm-agent-e2e`, branch
   `e2e-20260520-230509`. Job `6ed523aa62f3486dbdd4096e7f98e1c6` ran model

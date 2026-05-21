@@ -170,6 +170,25 @@
             </button>
           </div>
 
+          <div id="github-oauth-setup" class="github-oauth-setup">
+            <div class="job-field-grid oauth-field-grid">
+              <label>OAuth Client ID
+                <input id="github-oauth-client-id" type="text" autocomplete="off" placeholder="GitHub OAuth App client ID" />
+              </label>
+              <label>OAuth Client Secret
+                <input id="github-oauth-client-secret" type="password" autocomplete="off" placeholder="Paste to update" />
+              </label>
+            </div>
+            <div class="repo-search-row">
+              <input id="github-oauth-callback-url" type="text" readonly value="Loading callback URL..." />
+              <button id="github-oauth-save-btn" class="inline-action" type="button">
+                <i data-lucide="save" aria-hidden="true"></i>
+                <span>Save</span>
+              </button>
+            </div>
+            <p id="github-oauth-config-status" class="hint">Use this callback URL in the GitHub OAuth App, then sign in.</p>
+          </div>
+
           <form id="code-job-form" class="code-job-form">
             <label>Repository search
               <div class="repo-search-row">
@@ -304,7 +323,7 @@
           <p id="settings-github-status" class="hint">GitHub status unknown.</p>
           <button id="settings-github-connect" class="inline-action" type="button">
             <i data-lucide="github" aria-hidden="true"></i>
-            <span>Connect GitHub App</span>
+            <span>Sign in with GitHub</span>
           </button>
         </section>
       </div>
@@ -316,6 +335,6 @@
       lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
     }
   </script>
-  <script src="app.js?v=20260520-agent-jobs"></script>
+  <script src="app.js?v=20260521-github-oauth"></script>
 </body>
 </html>

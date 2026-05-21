@@ -48,13 +48,18 @@ worker summary:
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and available worker capacity.
 
-## Code Change Mode And GitHub App Integration
+## Code Change Mode And GitHub Integration
 
 The main workspace includes a gated Code mode for authenticated users. It can
-connect a GitHub App installation, list installed repositories and branches, and
-queue agentic coding jobs that run inside isolated Kubernetes Jobs. The GitHub
-button remains clickable when the backend is not configured so the UI can show
-which required settings are missing instead of presenting a dead disabled state.
+connect to GitHub from the website, list authorized repositories and branches,
+and queue agentic coding jobs that run inside isolated Kubernetes Jobs.
+
+The normal connection path is GitHub OAuth. In Code mode, paste a GitHub OAuth
+App Client ID and Client Secret into the GitHub setup fields, use the displayed
+callback URL (`http://localllm.lan/github/oauth/callback` on the LAN deployment)
+in the OAuth App, then click **Sign in with GitHub**. The backend stores those
+user-supplied values encrypted in SQLite; GitHub credentials no longer need to
+be injected through backend env vars for the normal redirect flow.
 
 Live code execution is disabled by default. Enable it only after the sandbox
 namespace, NetworkPolicy enforcement, and canary tests pass:
@@ -63,29 +68,28 @@ namespace, NetworkPolicy enforcement, and canary tests pass:
 kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 ```
 
-Required backend environment variables:
+Required backend environment variables for live execution:
 
-- `GITHUB_APP_ID`
-- `GITHUB_APP_SLUG`
-- `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE`
 - `AGENT_SECRET_KEY`
-- `GITHUB_ALLOWED_INSTALLATION_IDS`
 - `AGENT_JOBS_ENABLED=true` after sandbox validation
 
-`GITHUB_ALLOWED_INSTALLATION_IDS` is a comma-separated allowlist. The app may
-show GitHub connection status without it, but live job creation is blocked until
-the connected installation id is explicitly allowed.
+The older GitHub App installation path remains supported for deployments that
+want installation tokens. That legacy path still uses `GITHUB_APP_ID`,
+`GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE`,
+and `GITHUB_ALLOWED_INSTALLATION_IDS`. OAuth-connected users do not need those
+GitHub App env vars.
 
 For a controlled live smoke test before a GitHub App exists, the backend also
 recognizes `GITHUB_BYPASS_TOKEN` or `GITHUB_BYPASS_TOKEN_FILE`. This treats a
 single Kubernetes Secret-backed GitHub token as the installation token source and
 should be temporary, LAN-only, and limited to disposable repositories. The normal
-production path remains the GitHub App installation flow above.
+production path remains the site-driven OAuth redirect flow above.
 
 The runner image is built from `agent-runner/` and published by GitHub Actions as
-`ghcr.io/<owner>/<repo>/agent-runner`. Each job gets a short-lived GitHub App
-installation token, clones the selected repository, creates an `agent/<job-id>`
-branch, then runs a bounded multi-agent quality loop:
+`ghcr.io/<owner>/<repo>/agent-runner`. Each job gets a GitHub repository access
+token from the connected OAuth account or legacy GitHub App installation, clones
+the selected repository, creates an `agent/<job-id>` branch, then runs a bounded
+multi-agent quality loop:
 
 1. an implementation subagent drafts the change,
 2. a reviewer subagent checks correctness, scope, maintainability, and safety,
@@ -97,7 +101,7 @@ The model tool loop can read/search/write files, inspect diffs, and run bounded
 shell commands inside the isolated repository workspace. If no diff is present,
 the reviewer step runs the configured test command once to give the revision
 subagent concrete failure output. The runner requests a fresh installation token
-for push/PR operations only after the reviewer and testing gates are satisfied.
+or OAuth repository token for push/PR operations only after the reviewer and testing gates are satisfied.
 If the branch is protected or the push diverges, the runner pushes the agent
 branch and creates a PR instead. If no test command is supplied, it must not
 update the base branch.

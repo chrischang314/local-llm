@@ -58,24 +58,28 @@ must stay out of git.
 The main workspace has separate Chat and Code modes. Chat remains a
 conversational UI over routed Ollama workers; Code mode is an authenticated
 operational workflow that prompts a repository change, connects to GitHub
-through a GitHub App installation, and executes inside a dedicated Kubernetes
-sandbox namespace.
+through a site-configured GitHub OAuth redirect, and executes inside a dedicated
+Kubernetes sandbox namespace.
 
 The backend stores GitHub installation records, queued jobs, ordered steps, logs,
 and diff artifacts in SQLite. The frontend talks to `/github/*` for installation
 status, repository listing, and branch lookup, then `/agent/*` for create/list,
 detail, SSE events, cancellation, and diff retrieval.
 
-The intended authorization path is a GitHub App installation. A temporary
-`GITHUB_BYPASS_TOKEN` escape hatch exists only for controlled LAN smoke tests
-against disposable repositories before the GitHub App is configured. It should
-not replace installation tokens for normal use.
+The intended authorization path is GitHub OAuth configured from the website. A
+user enters the OAuth App Client ID and Client Secret in Code mode, the backend
+stores them encrypted in SQLite, and the Sign in button redirects through
+GitHub. The legacy GitHub App installation path is still present for deployments
+that prefer installation tokens. A temporary `GITHUB_BYPASS_TOKEN` escape hatch
+exists only for controlled LAN smoke tests against disposable repositories and
+should not replace the OAuth flow for normal use.
 
 The execution path is:
 
 1. User chooses repository, branch, model, task, and optional test command.
-2. Backend mints a short-lived GitHub App installation token and creates a
-   Kubernetes Job in `local-llm-sandbox`.
+2. Backend obtains a repository access token from the connected OAuth account
+   or legacy GitHub App installation and creates a Kubernetes Job in
+   `local-llm-sandbox`.
 3. Runner clones the repository and creates an `agent/<job-id>` branch.
 4. An implementation subagent uses the local OpenAI-compatible API for a bounded
    read/search/write/run-shell/inspect-diff tool loop inside the isolated

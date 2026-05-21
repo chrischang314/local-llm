@@ -38,6 +38,10 @@ _NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("conversations", "temperature", "REAL DEFAULT 0.7"),
     ("conversations", "top_p", "REAL DEFAULT 0.9"),
     ("conversations", "top_k", "INTEGER DEFAULT 40"),
+    ("github_installations", "auth_type", "TEXT DEFAULT 'app'"),
+    ("github_installations", "access_token_encrypted", "TEXT"),
+    ("github_installations", "token_scope", "TEXT"),
+    ("github_installations", "token_type", "TEXT"),
 ]
 
 

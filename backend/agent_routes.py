@@ -30,7 +30,12 @@ from agent_services import (
 from auth import current_user_id
 from database import AsyncSessionLocal, get_db
 from github_client import github_app_client
-from github_routes import allowed_installation_ids, current_installation
+from github_routes import (
+    allowed_installation_ids,
+    connection_uses_oauth,
+    current_installation,
+    github_token_for_installation,
+)
 from models import AgentArtifact, AgentJob, AgentJobLog, AgentJobStep
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -88,8 +93,11 @@ def _initial_steps(job_id: str) -> list[AgentJobStep]:
 
 
 @router.get("/status")
-async def agent_status(_: int = Depends(current_user_id)):
-    missing = _missing_agent_config()
+async def agent_status(
+    user_id: int = Depends(current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    missing = await _missing_agent_config(db, user_id)
     return {
         "enabled": agent_jobs_enabled() and not missing,
         "requested_enabled": agent_jobs_enabled(),
@@ -99,16 +107,19 @@ async def agent_status(_: int = Depends(current_user_id)):
     }
 
 
-def _missing_agent_config() -> list[str]:
+async def _missing_agent_config(db: AsyncSession, user_id: int) -> list[str]:
     missing = []
     if not agent_jobs_enabled():
         missing.append("AGENT_JOBS_ENABLED")
     if not os.getenv("AGENT_SECRET_KEY"):
         missing.append("AGENT_SECRET_KEY")
-    if agent_jobs_enabled() and not allowed_installation_ids():
-        missing.append("GITHUB_ALLOWED_INSTALLATION_IDS")
+    installation = await current_installation(db, user_id)
+    if installation and connection_uses_oauth(installation):
+        return missing
     if github_app_client.bypass_token_configured():
         return missing
+    if agent_jobs_enabled() and not allowed_installation_ids():
+        missing.append("GITHUB_ALLOWED_INSTALLATION_IDS")
     return missing + github_app_client.config().missing
 
 
@@ -125,16 +136,17 @@ async def create_job(
 
     installation = await current_installation(db, user_id)
     if not installation:
-        raise HTTPException(status_code=404, detail="GitHub App is not connected")
-    allowed_ids = allowed_installation_ids()
-    if not allowed_ids:
-        raise HTTPException(
-            status_code=503,
-            detail="GITHUB_ALLOWED_INSTALLATION_IDS is required before live agent jobs can run",
-        )
-    if installation.installation_id not in allowed_ids:
-        raise HTTPException(status_code=403, detail="Connected GitHub installation is not allowed for agent jobs")
-    await _validate_repo_branch_access(installation.installation_id, request.repo_full_name, request.base_branch)
+        raise HTTPException(status_code=404, detail="GitHub is not connected")
+    if not connection_uses_oauth(installation):
+        allowed_ids = allowed_installation_ids()
+        if not allowed_ids:
+            raise HTTPException(
+                status_code=503,
+                detail="GITHUB_ALLOWED_INSTALLATION_IDS is required before live agent jobs can run",
+            )
+        if installation.installation_id not in allowed_ids:
+            raise HTTPException(status_code=403, detail="Connected GitHub installation is not allowed for agent jobs")
+    await _validate_repo_branch_access(installation, request.repo_full_name, request.base_branch)
 
     job_id = new_job_id()
     job = AgentJob(
@@ -357,9 +369,9 @@ async def internal_github_token(
         raise HTTPException(status_code=409, detail="Job is no longer active")
     installation = await current_installation(db, job.user_id)
     if not installation:
-        raise HTTPException(status_code=404, detail="GitHub App is not connected")
+        raise HTTPException(status_code=404, detail="GitHub is not connected")
     try:
-        token_payload = await github_app_client.create_installation_token(installation.installation_id)
+        token_payload = await github_token_for_installation(installation)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -381,7 +393,7 @@ async def launch_agent_job(job_id: str) -> None:
         installation = await current_installation(db, job.user_id)
         if not installation:
             job.status = "failed"
-            job.error_summary = "GitHub App is not connected"
+            job.error_summary = "GitHub is not connected"
             job.completed_at = utcnow()
             await append_job_log(db, job.id, job.error_summary, level="error")
             await db.commit()
@@ -391,8 +403,8 @@ async def launch_agent_job(job_id: str) -> None:
             job.status = "launching"
             job.started_at = utcnow()
             job.updated_at = utcnow()
-            await append_job_log(db, job.id, "Minting short-lived GitHub installation token.")
-            token_payload = await github_app_client.create_installation_token(installation.installation_id)
+            await append_job_log(db, job.id, "Preparing GitHub repository access token.")
+            token_payload = await github_token_for_installation(installation)
             token = token_payload["token"]
             if agent_executor_mode() != "kubernetes":
                 raise RuntimeError(f"Unsupported agent executor mode: {agent_executor_mode()}")
@@ -437,13 +449,17 @@ async def _owned_job(
 
 
 async def _validate_repo_branch_access(
-    installation_id: str,
+    installation,
     repo_full_name: str,
     base_branch: str,
 ) -> None:
     owner, repo = repo_full_name.split("/", 1)
     try:
-        branches = await github_app_client.branches(installation_id, owner, repo)
+        if connection_uses_oauth(installation):
+            token = (await github_token_for_installation(installation))["token"]
+            branches = await github_app_client.branches_for_token(token, owner, repo)
+        else:
+            branches = await github_app_client.branches(installation.installation_id, owner, repo)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:
@@ -454,7 +470,7 @@ async def _validate_repo_branch_access(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=503, detail=f"GitHub API unavailable: {exc}") from exc
     if not any(branch.get("name") == base_branch for branch in branches):
-        raise HTTPException(status_code=400, detail="Selected branch is not visible to the GitHub App installation")
+        raise HTTPException(status_code=400, detail="Selected branch is not visible to the GitHub connection")
 
 
 def _check_agent_token(job_id: str, value: str | None) -> None:

@@ -92,6 +92,12 @@ const pullModelBtn = $("pull-model-btn");
 const pullProgress = $("pull-progress");
 const settingsGithubStatus = $("settings-github-status");
 const settingsGithubConnect = $("settings-github-connect");
+const githubOauthSetup = $("github-oauth-setup");
+const githubOauthClientId = $("github-oauth-client-id");
+const githubOauthClientSecret = $("github-oauth-client-secret");
+const githubOauthCallbackUrl = $("github-oauth-callback-url");
+const githubOauthSaveBtn = $("github-oauth-save-btn");
+const githubOauthConfigStatus = $("github-oauth-config-status");
 
 // Code Jobs
 const agentStatusPill = $("agent-status-pill");
@@ -293,6 +299,21 @@ const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "canceled", "needs
 
 async function completeGithubInstallFromUrl() {
   const params = new URLSearchParams(window.location.search);
+  const oauthResult = params.get("github_oauth");
+  if (oauthResult) {
+    const message = params.get("message");
+    if (githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent =
+        oauthResult === "connected"
+          ? "GitHub sign-in completed."
+          : `GitHub sign-in failed: ${message || "unknown error"}`;
+    }
+    params.delete("github_oauth");
+    params.delete("message");
+    const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, next);
+    return;
+  }
   const installationId = params.get("installation_id");
   const state = params.get("state");
   if (!installationId || !state) return;
@@ -339,7 +360,7 @@ function getAgentDisabledReason() {
   const missing = agentStatus.missing || [];
   if (agentStatus.error) return `Agent API unavailable: ${agentStatus.error}`;
   if (missing.some((name) => name.startsWith("GITHUB_APP_") || name === "GITHUB_ALLOWED_INSTALLATION_IDS")) {
-    return "GitHub App setup is required before code changes can run.";
+    return "GitHub setup is required before code changes can run.";
   }
   if (missing.includes("AGENT_SECRET_KEY")) {
     return "Agent signing secret is missing from the backend deployment.";
@@ -353,8 +374,8 @@ function getAgentDisabledReason() {
 
 function getGithubSetupMessage() {
   const missing = githubStatus?.missing || [];
-  if (!missing.length) return "GitHub App backend settings are missing.";
-  return `GitHub App backend settings are missing: ${missing.join(", ")}. Add them as Kubernetes secrets/env vars, then restart the backend.`;
+  if (!missing.length) return "Enter GitHub OAuth settings, then sign in.";
+  return `Enter ${missing.join(" and ")} above, save, then sign in with GitHub.`;
 }
 
 async function refreshGithubStatus() {
@@ -372,39 +393,77 @@ async function refreshGithubStatus() {
 function renderGithubStatus() {
   const connected = !!githubStatus?.connected;
   const configured = !!githubStatus?.configured;
-  const installation = githubStatus?.installation;
+  const installation = githubStatus?.connection || githubStatus?.installation;
   const missing = githubStatus?.missing?.length ? ` Missing: ${githubStatus.missing.join(", ")}` : "";
   const text = connected
     ? `Connected to ${installation?.account_login || "GitHub"}`
     : configured
-      ? "GitHub App ready to connect"
-      : `GitHub App not configured.${missing}`;
+      ? "GitHub OAuth ready to sign in"
+      : `GitHub OAuth not configured.${missing}`;
 
   if (githubStatusText) githubStatusText.textContent = text;
   if (settingsGithubStatus) settingsGithubStatus.textContent = text;
+  if (githubOauthCallbackUrl && githubStatus?.oauth?.callback_url) {
+    githubOauthCallbackUrl.value = githubStatus.oauth.callback_url;
+  }
+  if (githubOauthClientId && githubStatus?.oauth?.client_id && !githubOauthClientId.value) {
+    githubOauthClientId.value = githubStatus.oauth.client_id;
+  }
+  if (githubOauthSetup) {
+    githubOauthSetup.classList.toggle("connected", connected);
+  }
   [githubConnectBtn, settingsGithubConnect].forEach((button) => {
     if (!button) return;
     button.disabled = false;
     button.querySelector("span").textContent = connected
       ? "Reconnect"
       : configured
-        ? "Connect GitHub App"
-        : "Setup GitHub App";
+        ? "Sign in with GitHub"
+        : "Save keys and sign in";
   });
 }
 
-async function startGithubInstall() {
-  if (githubStatus && !githubStatus.configured) {
-    alert(getGithubSetupMessage());
-    return;
+async function saveGithubOAuthConfig({ silent = false } = {}) {
+  const clientId = githubOauthClientId?.value.trim() || "";
+  const clientSecret = githubOauthClientSecret?.value.trim() || "";
+  if (!clientId || (!clientSecret && !githubStatus?.oauth?.configured)) {
+    if (!silent && githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent = "Client ID and Client Secret are required before GitHub sign-in.";
+    }
+    return false;
   }
   try {
-    const data = await apiJson("/github/install/start", { method: "POST" });
-    if (!data.configured || !data.install_url) {
-      alert(`GitHub App is not configured: ${(data.missing || []).join(", ")}`);
+    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "Saving GitHub OAuth settings...";
+    await apiJson("/github/oauth/config", {
+      method: "POST",
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret || null }),
+    });
+    if (githubOauthClientSecret) githubOauthClientSecret.value = "";
+    if (githubOauthConfigStatus && !silent) githubOauthConfigStatus.textContent = "GitHub OAuth settings saved.";
+    await refreshGithubStatus();
+    return true;
+  } catch (err) {
+    if (githubOauthConfigStatus) githubOauthConfigStatus.textContent = err.message;
+    if (!silent) alert(`GitHub OAuth setup failed: ${err.message}`);
+    return false;
+  }
+}
+
+async function startGithubInstall() {
+  try {
+    if (!githubStatus?.configured) {
+      const saved = await saveGithubOAuthConfig({ silent: true });
+      if (!saved) {
+        alert(getGithubSetupMessage());
+        return;
+      }
+    }
+    const data = await apiJson("/github/oauth/start", { method: "POST" });
+    if (!data.configured || !data.auth_url) {
+      alert(`GitHub OAuth is not configured: ${(data.missing || []).join(", ")}`);
       return;
     }
-    window.location.href = data.install_url;
+    window.location.href = data.auth_url;
   } catch (err) {
     alert(`GitHub connect failed: ${err.message}`);
   }
@@ -616,7 +675,7 @@ function updateRunButtonState() {
   runCodeJobBtn.disabled = !enabled;
   if (!agentStatus?.enabled) codeJobFormStatus.textContent = getAgentDisabledReason();
   else if (!githubStatus?.configured) codeJobFormStatus.textContent = getGithubSetupMessage();
-  else if (!githubStatus?.connected) codeJobFormStatus.textContent = "Connect the GitHub App before running code changes.";
+  else if (!githubStatus?.connected) codeJobFormStatus.textContent = "Sign in with GitHub before running code changes.";
   else codeJobFormStatus.textContent = "";
 }
 
@@ -672,6 +731,7 @@ function escapeHtml(value) {
 
 githubConnectBtn?.addEventListener("click", startGithubInstall);
 settingsGithubConnect?.addEventListener("click", startGithubInstall);
+githubOauthSaveBtn?.addEventListener("click", () => saveGithubOAuthConfig());
 refreshCodeJobsBtn?.addEventListener("click", async () => {
   await Promise.all([refreshAgentStatus(), refreshGithubStatus(), refreshAgentJobs()]);
 });

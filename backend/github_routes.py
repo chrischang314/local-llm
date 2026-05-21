@@ -1,13 +1,15 @@
-"""Authenticated GitHub App integration routes."""
+"""Authenticated GitHub integration routes."""
 
 import json
 import os
 import secrets
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +17,8 @@ from agent_services import utcnow
 from auth import current_user_id
 from database import get_db
 from github_client import github_app_client
-from models import GitHubInstallation, GitHubInstallState
+from models import GitHubInstallation, GitHubInstallState, GitHubOAuthConfig
+from secret_store import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -25,16 +28,23 @@ class GitHubInstallCompleteRequest(BaseModel):
     state: str
 
 
+class GitHubOAuthConfigRequest(BaseModel):
+    client_id: str = Field(min_length=1, max_length=200)
+    client_secret: str | None = Field(default=None, max_length=500)
+
+
 def _serialize_installation(installation: GitHubInstallation | None) -> dict | None:
     if not installation:
         return None
     return {
         "installation_id": installation.installation_id,
+        "auth_type": installation.auth_type or "app",
         "account_login": installation.account_login,
         "account_type": installation.account_type,
         "app_slug": installation.app_slug,
         "repository_selection": installation.repository_selection,
         "permissions": json.loads(installation.permissions_json or "{}"),
+        "token_scope": installation.token_scope,
         "updated_at": installation.updated_at.isoformat() if installation.updated_at else None,
     }
 
@@ -61,21 +71,198 @@ async def current_installation(db: AsyncSession, user_id: int) -> GitHubInstalla
     return result.scalars().first()
 
 
+async def current_oauth_config(db: AsyncSession, user_id: int) -> GitHubOAuthConfig | None:
+    result = await db.execute(
+        select(GitHubOAuthConfig).where(GitHubOAuthConfig.user_id == user_id)
+    )
+    return result.scalars().first()
+
+
+def _serialize_oauth_config(config: GitHubOAuthConfig | None, request: Request) -> dict:
+    return {
+        "configured": config is not None,
+        "client_id": config.client_id if config else "",
+        "callback_url": str(request.url_for("github_oauth_callback")),
+    }
+
+
+def connection_auth_type(installation: GitHubInstallation | None) -> str:
+    return (installation.auth_type if installation else "") or "app"
+
+
+def connection_uses_oauth(installation: GitHubInstallation | None) -> bool:
+    return connection_auth_type(installation) == "oauth"
+
+
+async def github_token_for_installation(installation: GitHubInstallation) -> dict:
+    if connection_uses_oauth(installation):
+        try:
+            token = decrypt_secret(installation.access_token_encrypted)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if not token:
+            raise RuntimeError("GitHub OAuth token is missing; reconnect GitHub")
+        return {"token": token, "expires_at": None}
+    return await github_app_client.create_installation_token(installation.installation_id)
+
+
 @router.get("/status")
 async def github_status(
+    request: Request,
     user_id: int = Depends(current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    config = github_app_client.config()
+    app_config = github_app_client.config()
+    oauth_config = await current_oauth_config(db, user_id)
     installation = await current_installation(db, user_id)
     bypass_configured = github_app_client.bypass_token_configured()
+    oauth_configured = oauth_config is not None
+    legacy_configured = app_config.configured or bypass_configured
+    configured = oauth_configured or legacy_configured
+    missing = [] if configured else ["GitHub OAuth Client ID", "GitHub OAuth Client Secret"]
+    mode = "oauth" if oauth_configured or connection_uses_oauth(installation) else (
+        "bypass_token" if bypass_configured and not app_config.configured else "github_app"
+    )
     return {
-        "configured": config.configured or bypass_configured,
-        "missing": [] if bypass_configured else config.missing,
-        "mode": "bypass_token" if bypass_configured and not config.configured else "github_app",
+        "configured": configured,
+        "missing": missing,
+        "mode": mode,
+        "legacy_app_configured": app_config.configured,
+        "bypass_configured": bypass_configured,
+        "oauth": _serialize_oauth_config(oauth_config, request),
         "connected": installation is not None,
+        "connection": _serialize_installation(installation),
         "installation": _serialize_installation(installation),
     }
+
+
+@router.post("/oauth/config")
+async def save_github_oauth_config(
+    request_body: GitHubOAuthConfigRequest,
+    request: Request,
+    user_id: int = Depends(current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    client_id = request_body.client_id.strip()
+    client_secret = (request_body.client_secret or "").strip()
+    config = await current_oauth_config(db, user_id)
+    if not config and not client_secret:
+        raise HTTPException(status_code=400, detail="GitHub OAuth Client Secret is required")
+    if not config:
+        config = GitHubOAuthConfig(
+            user_id=user_id,
+            client_id=client_id,
+            client_secret_encrypted=encrypt_secret(client_secret),
+        )
+        db.add(config)
+    else:
+        config.client_id = client_id
+        if client_secret:
+            config.client_secret_encrypted = encrypt_secret(client_secret)
+        config.updated_at = utcnow()
+    await db.commit()
+    await db.refresh(config)
+    return {"oauth": _serialize_oauth_config(config, request)}
+
+
+@router.post("/oauth/start")
+async def start_github_oauth(
+    request: Request,
+    user_id: int = Depends(current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    config = await current_oauth_config(db, user_id)
+    if not config:
+        return {
+            "configured": False,
+            "missing": ["GitHub OAuth Client ID", "GitHub OAuth Client Secret"],
+            "auth_url": None,
+            "callback_url": str(request.url_for("github_oauth_callback")),
+        }
+
+    state = secrets.token_urlsafe(32)
+    redirect_uri = str(request.url_for("github_oauth_callback"))
+    db.add(
+        GitHubInstallState(
+            user_id=user_id,
+            state=state,
+            expires_at=utcnow() + timedelta(minutes=30),
+        )
+    )
+    await db.commit()
+    return {
+        "configured": True,
+        "missing": [],
+        "auth_url": github_app_client.oauth_authorize_url(config.client_id, redirect_uri, state),
+        "state": state,
+        "callback_url": redirect_uri,
+        "mode": "oauth",
+    }
+
+
+@router.get("/oauth/callback", name="github_oauth_callback")
+async def github_oauth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    frontend_url = str(request.url_for("github_oauth_callback")).split("/github/oauth/callback", 1)[0] or "/"
+    if error:
+        message = urllib.parse.quote(error_description or error)
+        return RedirectResponse(f"{frontend_url}/?github_oauth=error&message={message}", status_code=303)
+    if not code or not state:
+        return RedirectResponse(f"{frontend_url}/?github_oauth=error&message=Missing%20GitHub%20OAuth%20code", status_code=303)
+
+    state_row = (
+        await db.execute(select(GitHubInstallState).where(GitHubInstallState.state == state))
+    ).scalar_one_or_none()
+    expires_at = _as_aware_utc(state_row.expires_at) if state_row else None
+    if not state_row or state_row.consumed or not expires_at or expires_at < utcnow():
+        return RedirectResponse(f"{frontend_url}/?github_oauth=error&message=Expired%20GitHub%20OAuth%20state", status_code=303)
+
+    config = await current_oauth_config(db, state_row.user_id)
+    if not config:
+        return RedirectResponse(f"{frontend_url}/?github_oauth=error&message=GitHub%20OAuth%20is%20not%20configured", status_code=303)
+
+    redirect_uri = str(request.url_for("github_oauth_callback"))
+    try:
+        token_payload = await github_app_client.exchange_oauth_code(
+            client_id=config.client_id,
+            client_secret=decrypt_secret(config.client_secret_encrypted),
+            code=code,
+            redirect_uri=redirect_uri,
+        )
+        user = await github_app_client.oauth_user(token_payload["access_token"])
+    except (RuntimeError, ValueError, httpx.HTTPError) as exc:
+        message = urllib.parse.quote(str(exc))
+        return RedirectResponse(f"{frontend_url}/?github_oauth=error&message={message}", status_code=303)
+
+    installation = await current_installation(db, state_row.user_id)
+    if not installation:
+        installation = GitHubInstallation(
+            user_id=state_row.user_id,
+            installation_id=f"oauth:{user.get('login') or user.get('id')}",
+        )
+        db.add(installation)
+
+    scopes = token_payload.get("scope") or ""
+    installation.installation_id = f"oauth:{user.get('login') or user.get('id')}"
+    installation.auth_type = "oauth"
+    installation.account_login = user.get("login")
+    installation.account_type = user.get("type") or "User"
+    installation.app_slug = "oauth"
+    installation.repository_selection = "all-visible-to-token"
+    installation.permissions_json = json.dumps({"scopes": scopes}, sort_keys=True)
+    installation.access_token_encrypted = encrypt_secret(token_payload["access_token"])
+    installation.token_scope = scopes
+    installation.token_type = token_payload.get("token_type") or "bearer"
+    installation.updated_at = utcnow()
+    state_row.consumed = True
+    await db.commit()
+    return RedirectResponse(f"{frontend_url}/?github_oauth=connected", status_code=303)
 
 
 @router.post("/install/start")
@@ -168,11 +355,15 @@ async def complete_github_install(
         db.add(installation)
 
     installation.installation_id = summary["installation_id"]
+    installation.auth_type = "app"
     installation.account_login = summary["account_login"]
     installation.account_type = summary["account_type"]
     installation.app_slug = summary["app_slug"]
     installation.repository_selection = summary["repository_selection"]
     installation.permissions_json = json.dumps(summary["permissions"], sort_keys=True)
+    installation.access_token_encrypted = None
+    installation.token_scope = None
+    installation.token_type = None
     installation.updated_at = utcnow()
     state.consumed = True
     await db.commit()
@@ -201,13 +392,12 @@ async def list_repositories(
 ):
     installation = await current_installation(db, user_id)
     if not installation:
-        raise HTTPException(status_code=404, detail="GitHub App is not connected")
+        raise HTTPException(status_code=404, detail="GitHub is not connected")
     try:
-        return await github_app_client.repositories(
-            installation.installation_id,
-            query=query,
-            page=page,
-        )
+        if connection_uses_oauth(installation):
+            token = (await github_token_for_installation(installation))["token"]
+            return await github_app_client.repositories_for_token(token, query=query, page=page)
+        return await github_app_client.repositories(installation.installation_id, query=query, page=page)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:
@@ -228,8 +418,11 @@ async def list_branches(
 ):
     installation = await current_installation(db, user_id)
     if not installation:
-        raise HTTPException(status_code=404, detail="GitHub App is not connected")
+        raise HTTPException(status_code=404, detail="GitHub is not connected")
     try:
+        if connection_uses_oauth(installation):
+            token = (await github_token_for_installation(installation))["token"]
+            return {"branches": await github_app_client.branches_for_token(token, owner, repo)}
         return {"branches": await github_app_client.branches(installation.installation_id, owner, repo)}
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

@@ -1114,7 +1114,22 @@ svg {
   gap: 14px;
 }
 
-.code-job-form label {
+.github-oauth-setup {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #f7fbf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.github-oauth-setup.connected {
+  background: var(--accent-soft);
+  border-color: #aadbd4;
+}
+
+.code-job-form label,
+.github-oauth-setup label {
   min-width: 0;
   display: grid;
   gap: 7px;
@@ -1142,7 +1157,10 @@ svg {
 #branch-select,
 #agent-model-select,
 #agent-task-input,
-#agent-test-command-input {
+#agent-test-command-input,
+#github-oauth-client-id,
+#github-oauth-client-secret,
+#github-oauth-callback-url {
   width: 100%;
   min-width: 0;
   min-height: 42px;
@@ -1152,6 +1170,12 @@ svg {
   border: 1px solid var(--line);
   border-radius: 8px;
   outline: 0;
+}
+
+#github-oauth-callback-url {
+  color: var(--muted-strong);
+  font-family: var(--mono);
+  font-size: 0.78rem;
 }
 
 #agent-task-input {

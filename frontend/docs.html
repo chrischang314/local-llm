@@ -188,19 +188,32 @@ data: [DONE]</code></pre>
         <p>
           Code mode in the main workspace uses authenticated same-origin API routes. Live execution
           stays disabled until the Kubernetes sandbox canaries pass and
-          <code>AGENT_JOBS_ENABLED=true</code> plus
-          <code>GITHUB_ALLOWED_INSTALLATION_IDS</code> are set. The agent tool
-          loop can read, search, write, and inspect diffs; arbitrary shell access
-          is not exposed to the model. Code jobs use an implementation subagent,
-          reviewer subagent, testing agent, and revision subagent, with bounded
-          review/test loops before push or PR creation.
+          <code>AGENT_JOBS_ENABLED=true</code> is set. GitHub sign-in is configured
+          from the site with a GitHub OAuth App Client ID and Client Secret, then
+          the Connect button redirects to GitHub. The agent tool loop can read,
+          search, write, inspect diffs, and run bounded shell commands in the
+          isolated workspace. Code jobs use an implementation subagent, reviewer
+          subagent, testing agent, and revision subagent, with bounded review/test
+          loops before push or PR creation.
         </p>
 
         <div class="endpoint">
           <span class="method get">GET</span>
           <span class="path">/github/status</span>
         </div>
-        <p>Returns GitHub App configuration and installation connection state.</p>
+        <p>Returns GitHub OAuth setup, legacy GitHub App setup, and connection state.</p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/github/oauth/config</span>
+        </div>
+        <p>Saves the user-supplied GitHub OAuth Client ID and Client Secret encrypted in SQLite.</p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/github/oauth/start</span>
+        </div>
+        <p>Creates an OAuth state token and returns the GitHub authorization URL.</p>
 
         <div class="endpoint">
           <span class="method post">POST</span>
@@ -218,7 +231,7 @@ data: [DONE]</code></pre>
           <span class="method get">GET</span>
           <span class="path">/github/repos</span>
         </div>
-        <p>Lists repositories visible to the connected GitHub App installation.</p>
+        <p>Lists repositories visible to the connected GitHub OAuth account or legacy GitHub App installation.</p>
 
         <div class="endpoint">
           <span class="method get">GET</span>

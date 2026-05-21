@@ -22,6 +22,9 @@ class User(Base):
     github_installations = relationship(
         "GitHubInstallation", back_populates="user", cascade="all, delete-orphan"
     )
+    github_oauth_configs = relationship(
+        "GitHubOAuthConfig", back_populates="user", cascade="all, delete-orphan"
+    )
     agent_jobs = relationship(
         "AgentJob", back_populates="user", cascade="all, delete-orphan"
     )
@@ -81,10 +84,26 @@ class GitHubInstallation(Base):
     app_slug = Column(String, nullable=True)
     repository_selection = Column(String, nullable=True)
     permissions_json = Column(Text, default="{}")
+    auth_type = Column(String, default="app", nullable=False)
+    access_token_encrypted = Column(Text, nullable=True)
+    token_scope = Column(Text, nullable=True)
+    token_type = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="github_installations")
+
+
+class GitHubOAuthConfig(Base):
+    __tablename__ = "github_oauth_configs"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    client_id = Column(String, nullable=False)
+    client_secret_encrypted = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
+
+    user = relationship("User", back_populates="github_oauth_configs")
 
 
 class AgentJob(Base):

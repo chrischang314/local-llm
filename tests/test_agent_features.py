@@ -16,7 +16,9 @@ import agent_executor  # noqa: E402
 import agent_routes  # noqa: E402
 import agent_services  # noqa: E402
 import github_client  # noqa: E402
-from models import AgentJob  # noqa: E402
+import github_routes  # noqa: E402
+import secret_store  # noqa: E402
+from models import AgentJob, GitHubInstallation  # noqa: E402
 
 
 class AgentServiceTests(unittest.TestCase):
@@ -264,7 +266,8 @@ class GitHubBypassTests(unittest.IsolatedAsyncioTestCase):
         ):
             for key in ("GITHUB_APP_ID", "GITHUB_APP_SLUG", "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_FILE"):
                 os.environ.pop(key, None)
-            self.assertEqual(agent_routes._missing_agent_config(), [])
+            with patch("agent_routes.current_installation", new=AsyncMock(return_value=None)):
+                self.assertEqual(await agent_routes._missing_agent_config(None, 1), [])
             token = await github_client.github_app_client.create_installation_token("bypass")
             self.assertEqual(token["token"], "test-bypass-token-value")
 
@@ -302,6 +305,37 @@ class GitHubBypassTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(seen["url"].endswith("/user/repos"))
         self.assertIn("Bearer test-bypass-token-value", seen["headers"]["Authorization"])
         self.assertEqual(repos["repositories"][0]["full_name"], "owner/demo")
+
+
+class GitHubOAuthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_oauth_authorize_url_redirects_to_github(self):
+        url = github_client.github_app_client.oauth_authorize_url(
+            "client-123",
+            "http://localllm.lan/github/oauth/callback",
+            "state-abc",
+        )
+
+        self.assertTrue(url.startswith("https://github.com/login/oauth/authorize?"))
+        self.assertIn("client_id=client-123", url)
+        self.assertIn("redirect_uri=http%3A%2F%2Flocalllm.lan%2Fgithub%2Foauth%2Fcallback", url)
+        self.assertIn("scope=repo", url)
+        self.assertIn("state=state-abc", url)
+
+    async def test_user_supplied_oauth_token_is_encrypted_and_reusable_for_runner(self):
+        encrypted = secret_store.encrypt_secret("gho_test_token_value")
+        self.assertNotIn("gho_test_token_value", encrypted)
+        self.assertEqual(secret_store.decrypt_secret(encrypted), "gho_test_token_value")
+
+        installation = GitHubInstallation(
+            user_id=1,
+            installation_id="oauth:chrischang314",
+            auth_type="oauth",
+            access_token_encrypted=encrypted,
+        )
+        token_payload = await github_routes.github_token_for_installation(installation)
+
+        self.assertEqual(token_payload["token"], "gho_test_token_value")
+        self.assertIsNone(token_payload["expires_at"])
 
 
 class AgentRunnerPathTests(unittest.TestCase):

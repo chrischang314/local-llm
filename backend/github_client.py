@@ -1,8 +1,9 @@
-"""Small GitHub App client used by the agentic code workflow."""
+"""Small GitHub client used by the agentic code workflow."""
 
 import os
 import pathlib
 import time
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -78,6 +79,46 @@ class GitHubAppClient:
             return None
         return f"{GITHUB_WEB}/apps/{config.app_slug}/installations/new?state={state}"
 
+    @staticmethod
+    def oauth_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
+        params = urllib.parse.urlencode(
+            {
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "scope": "repo",
+                "state": state,
+                "allow_signup": "true",
+            }
+        )
+        return f"{GITHUB_WEB}/login/oauth/authorize?{params}"
+
+    async def exchange_oauth_code(
+        self,
+        *,
+        client_id: str,
+        client_secret: str,
+        code: str,
+        redirect_uri: str,
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                f"{GITHUB_WEB}/login/oauth/access_token",
+                headers={"Accept": "application/json"},
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        if payload.get("error"):
+            raise RuntimeError(payload.get("error_description") or payload["error"])
+        if not payload.get("access_token"):
+            raise RuntimeError("GitHub OAuth did not return an access token")
+        return payload
+
     def app_jwt(self) -> str:
         config = self.config()
         if not config.configured:
@@ -131,6 +172,12 @@ class GitHubAppClient:
                 f"{GITHUB_API}/app/installations/{installation_id}",
                 headers=self.app_headers(),
             )
+            response.raise_for_status()
+            return response.json()
+
+    async def oauth_user(self, token: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{GITHUB_API}/user", headers=self.token_headers(token))
             response.raise_for_status()
             return response.json()
 
@@ -189,8 +236,44 @@ class GitHubAppClient:
             "total_count": len(repos) if isinstance(payload, list) else payload.get("total_count", len(repos)),
         }
 
+    async def repositories_for_token(
+        self,
+        token: str,
+        *,
+        query: str = "",
+        page: int = 1,
+        per_page: int = 50,
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                f"{GITHUB_API}/user/repos",
+                headers=self.token_headers(token),
+                params={
+                    "affiliation": "owner,collaborator,organization_member",
+                    "sort": "updated",
+                    "page": max(page, 1),
+                    "per_page": min(max(per_page, 1), 100),
+                },
+            )
+            response.raise_for_status()
+            repos = response.json()
+        if query:
+            needle = query.lower()
+            repos = [
+                repo for repo in repos
+                if needle in repo.get("full_name", "").lower()
+                or needle in (repo.get("description") or "").lower()
+            ]
+        return {
+            "repositories": [self._repo_summary(repo) for repo in repos],
+            "total_count": len(repos),
+        }
+
     async def branches(self, installation_id: str, owner: str, repo: str) -> list[dict[str, Any]]:
         token = (await self.create_installation_token(installation_id))["token"]
+        return await self.branches_for_token(token, owner, repo)
+
+    async def branches_for_token(self, token: str, owner: str, repo: str) -> list[dict[str, Any]]:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(
                 f"{GITHUB_API}/repos/{owner}/{repo}/branches",
