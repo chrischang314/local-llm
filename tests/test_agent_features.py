@@ -167,6 +167,26 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("exit=0", output)
         self.assertIn("123", output)
 
+    def test_read_file_directory_returns_small_repo_summary(self):
+        runner = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            (repo / "calculator.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+            (repo / "tests").mkdir()
+            (repo / "tests" / "test_calculator.py").write_text(
+                "from calculator import add, subtract\n",
+                encoding="utf-8",
+            )
+            runner.REPO_DIR = repo
+
+            output = runner.read_file(".")
+
+        self.assertIn("calculator.py", output)
+        self.assertIn("test_calculator.py", output)
+        self.assertIn("def add", output)
+        self.assertIn("subtract", output)
+
     def test_reviewer_empty_diff_includes_test_failure_context(self):
         runner = load_runner_module()
 

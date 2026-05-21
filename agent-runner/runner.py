@@ -302,9 +302,48 @@ def list_files(path: str = ".") -> str:
 
 def read_file(path: str) -> str:
     target = safe_path(path)
+    if target.is_dir():
+        return read_directory_summary(target)
     if not target.is_file():
         return "[not a file]"
     return trim(target.read_text(encoding="utf-8", errors="replace")[:MAX_FILE_READ])
+
+
+def read_directory_summary(target: Path) -> str:
+    files = []
+    for current, dirs, names in os.walk(target):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in sorted(names):
+            full = Path(current) / name
+            try:
+                relative = full.relative_to(REPO_DIR)
+            except ValueError:
+                continue
+            files.append(relative)
+            if len(files) >= 24:
+                break
+        if len(files) >= 24:
+            break
+
+    parts = [f"[directory: {target.relative_to(REPO_DIR) if target != REPO_DIR else '.'}]", "Files:"]
+    parts.extend(str(path) for path in files)
+    remaining = MAX_FILE_READ - sum(len(part) + 1 for part in parts)
+
+    for relative in files:
+        full = REPO_DIR / relative
+        try:
+            if full.stat().st_size > 30_000:
+                continue
+            content = full.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        section = f"\n--- {relative} ---\n{content}"
+        if len(section) > remaining:
+            break
+        parts.append(section)
+        remaining -= len(section)
+
+    return trim("\n".join(parts))
 
 
 def search_repo(query: str) -> str:
