@@ -7,6 +7,9 @@
 - `/health` now includes a `workers` summary with total, enabled, available,
   busy, and loaded model counts. The frontend sidebar renders this as
   model count plus worker availability.
+- Assistant messages now store and display route metadata in the chat UI
+  (`backend_name`, `model`, and `model_status`) so saved conversations show
+  which worker handled each reply.
 - `chris-pc-1-ollama-switch` lives in the `local-llm` namespace and is currently
   the Kubernetes on/off switch for that PC.
 - Login tokens are stored in browser `localStorage`. The backend signs them
@@ -102,6 +105,8 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 - Focused health unit coverage lives in `tests/test_health.py`.
 - Conversation export unit and route coverage lives in
   `tests/test_conversation_export.py`.
+- Chat route-metadata serialization coverage lives in
+  `tests/test_chat_metadata.py`.
 - Agent feature coverage lives in `tests/test_agent_features.py`.
 - For a live smoke check, call `http://localllm.lan/health` and confirm the
   `workers` object is present, then open the chat UI and inspect the sidebar

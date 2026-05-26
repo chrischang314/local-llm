@@ -758,6 +758,15 @@ svg {
   font-weight: 800;
 }
 
+.message-route {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
 .bubble {
   width: fit-content;
   max-width: min(100%, 760px);

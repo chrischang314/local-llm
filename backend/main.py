@@ -85,7 +85,13 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Conversation-Id", "X-LLM-Backend"],
+    expose_headers=[
+        "X-Conversation-Id",
+        "X-LLM-Backend",
+        "X-LLM-Model-Status",
+        "X-LLM-Model-Loaded",
+        "X-LLM-Model-Expires-At",
+    ],
 )
 
 app.include_router(github_router)
@@ -287,6 +293,17 @@ def _serialize_conversation(c: Conversation) -> dict:
     }
 
 
+def _serialize_message(m: DBMessage) -> dict:
+    return {
+        "id": m.id,
+        "role": m.role,
+        "content": m.content,
+        "model": m.model,
+        "backend_name": m.backend_name,
+        "model_status": m.model_status,
+    }
+
+
 @app.get("/conversations")
 async def list_conversations(
     user_id: int = Depends(current_user_id),
@@ -378,7 +395,7 @@ async def get_messages(
     conv = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return [{"id": m.id, "role": m.role, "content": m.content} for m in conv.messages]
+    return [_serialize_message(m) for m in conv.messages]
 
 
 @app.get("/conversations/{conversation_id}/export")
@@ -768,6 +785,7 @@ async def _persist_chat_result(
     is_new: bool,
     conversation_id: int,
     user_content: str | None,
+    assistant_route: dict | None = None,
 ):
     """Save the result of a chat stream (or clean up if it produced nothing).
 
@@ -796,6 +814,9 @@ async def _persist_chat_result(
                     conversation_id=conversation_id,
                     role="assistant",
                     content=full_response,
+                    model=assistant_route.get("model") if assistant_route else None,
+                    backend_name=assistant_route.get("backend_name") if assistant_route else None,
+                    model_status=assistant_route.get("model_status") if assistant_route else None,
                 )
             )
             conv.updated_at = datetime.now(timezone.utc)
@@ -886,6 +907,11 @@ async def chat(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     model_runtime = await ollama_router.model_runtime_status(selected_backend, model)
     model_status = "resident" if model_runtime.get("loaded") else "loading"
+    assistant_route = {
+        "model": model,
+        "backend_name": selected_backend.name,
+        "model_status": model_status,
+    }
 
     async def stream_and_save():
         full_response = ""
@@ -924,6 +950,7 @@ async def chat(
                         is_new,
                         conversation_id,
                         user_content_to_save,
+                        assistant_route,
                     )
                 )
             except asyncio.CancelledError:
