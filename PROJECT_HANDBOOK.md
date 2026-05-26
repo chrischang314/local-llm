@@ -14,14 +14,18 @@ rebooting.
 ## Optional Windows Workers
 
 Windows PCs are not joined as native K3s nodes in this setup. Instead, each PC
-runs Docker Desktop and an Ollama container locally. Kubernetes represents the
-PC with a tiny "switch" Deployment:
+runs Ollama locally and exposes it over the LAN. A PC can use either the older
+Docker Desktop container path or the native Windows Ollama launcher, depending
+on what is durable on that host. Kubernetes represents the PC with a tiny
+"switch" Deployment:
 
 - `replicas: 1` means the user wants that PC worker on.
 - `replicas: 0` means the user wants that PC worker off.
 
 A scheduled PowerShell controller on the PC watches the switch Deployment and
-starts or stops the matching Docker Compose service. It writes status
+starts or stops the matching local runtime. Docker workers start a Docker
+Compose service. Native workers start a scheduled task that launches
+`ollama.exe serve` as a detached process. The controller writes status
 annotations back to Kubernetes so dashboards can distinguish desired state from
 actual state.
 
@@ -133,8 +137,12 @@ before enabling jobs on an untrusted network or for sensitive private code.
 ## Operational Safety
 
 Secrets and local runtime state stay out of git. In particular, do not commit
-kube tokens, SSH keys, Docker credential files, or `.docker-worker/`.
+kube tokens, SSH keys, Docker credential files, `.docker-worker/`, or files
+copied back from `C:\ProgramData\LocalLlmWorker`.
 
-When adding another Windows worker, copy the CHRIS-PC-1 pattern: add a switch
-Deployment, a restricted worker-controller service account, routing config, docs,
-and an interactive Windows scheduled task for Docker Desktop plus the controller.
+When adding another Windows worker, copy the pattern that matches the host. For
+native Ollama, copy the current CHRIS-PC-1 pattern: add a switch Deployment, a
+restricted worker-controller service account, routing config, docs, a native
+Ollama launcher task, and a controller task. Use the Docker Desktop pattern only
+for machines where Docker Desktop is already reliable without manual desktop
+repair.

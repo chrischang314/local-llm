@@ -15,13 +15,17 @@
 - Login tokens are stored in browser `localStorage`. The backend signs them
   with `JWT_SECRET` when set, otherwise it generates and reuses
   `/app/data/jwt_secret` on the persistent chat-data volume.
-- The CHRIS-PC-1 controller runs as the Windows scheduled task
-  `Local LLM CHRIS-PC-1 Worker Controller`.
-- Docker Desktop is started at logon by the `Start Docker Desktop` scheduled
-  task so the controller can use the Docker named pipe from the interactive
-  Windows session.
+- CHRIS-PC-1 now runs the native Windows Ollama worker, not the Docker Desktop
+  worker. The launcher task is `Local LLM Native Ollama CHRIS-PC-1`, and the
+  watcher task is `Local LLM CHRIS-PC-1 Native Worker Controller`.
+- CHRIS-PC-1 runtime files live under `C:\ProgramData\LocalLlmWorker`, and its
+  model store is `C:\ProgramData\Ollama\models`.
 - `llama3.2:3b` is installed on CHRIS-PC-1 and was verified with a direct
   generate request from inside the Kubernetes backend pod.
+- CHRIS-PC-2 is still unavailable as of 2026-05-26: SSH on
+  `chris@192.168.4.24` rejects the installed key, and Ollama is not answering on
+  `http://192.168.4.24:11434`. The Kubernetes switch is desired on but actual
+  off.
 - A gated Code mode now exists in the main workspace for GitHub-backed code
   execution. The normal connection path is service-configured GitHub OAuth: one
   Local LLM operator saves the OAuth App Client ID/Secret in Code mode, then
@@ -42,6 +46,8 @@
 - Do not commit kubeconfigs, service-account tokens, SSH keys, Docker auth
   files, anything under `.docker-worker/`, or any generated `data/jwt_secret`
   file.
+- Do not commit files copied back from `C:\ProgramData\LocalLlmWorker`; that
+  directory contains the worker kubeconfig plus local runtime logs.
 - Do not commit GitHub OAuth Client Secrets, OAuth access tokens,
   `GITHUB_APP_PRIVATE_KEY`, GitHub installation tokens, `AGENT_SECRET_KEY`,
   webhook secrets, kube service-account tokens, or runner callback payloads that
@@ -75,10 +81,12 @@
   closes and backend restarts until logout or token expiry.
 - Agent runner callbacks use `http://backend.default.svc.cluster.local:8000` in
   this cluster because the local-llm backend Service is named `backend`.
-- If CHRIS-PC-1 appears offline, first check Docker Desktop and the scheduled
-  tasks on that PC, then check the switch annotations:
+- If CHRIS-PC-1 appears offline, first check the native scheduled tasks and
+  launch logs on that PC, then check the switch annotations:
 
 ```powershell
+Get-ScheduledTask -TaskName "Local LLM Native Ollama CHRIS-PC-1","Local LLM CHRIS-PC-1 Native Worker Controller"
+Get-Content C:\ProgramData\LocalLlmWorker\ollama-launch.log -Tail 40
 kubectl -n local-llm get deploy chris-pc-1-ollama-switch -o yaml
 ```
 
@@ -97,7 +105,7 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 
 - To refresh the CHRIS-PC-1 controller files, copy the scripts to
   `C:\Users\chris\Projects\local-llm\scripts` on that host and rerun
-  `install-local-ollama-worker-controller.ps1` with the CHRIS-PC-1 parameters in
+  `install-local-ollama-native-worker.ps1` with the CHRIS-PC-1 parameters in
   `docs/k8s-personal-workers.md`.
 
 ## Verification Notes
@@ -137,3 +145,7 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
   `local-llm-agent-bypass` was deleted, backend env was reset to
   `AGENT_JOBS_ENABLED=false`, the backend rolled out successfully, and
   `http://localllm.lan/health` still returned `backend=ok` and `ollama=ok`.
+- Live worker repair on 2026-05-26 moved CHRIS-PC-1 from the brittle Docker
+  Desktop path to native Ollama. From inside the live backend pod,
+  `http://192.168.4.27:11434/api/generate` with `llama3.2:3b` returned
+  `PC1_OK`, and `http://localllm.lan/health` reported `workers.available=2`.
