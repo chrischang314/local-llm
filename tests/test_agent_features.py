@@ -376,7 +376,10 @@ class AgentRunnerPathTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             runner.REPO_DIR = pathlib.Path(tmp)
-            self.assertEqual(runner.safe_path("src/app.py"), pathlib.Path(tmp) / "src" / "app.py")
+            self.assertEqual(
+                runner.safe_path("src/app.py"),
+                (pathlib.Path(tmp) / "src" / "app.py").resolve(),
+            )
             with self.assertRaises(ValueError):
                 runner.safe_path("../outside.txt")
             with self.assertRaises(ValueError):
