@@ -60,11 +60,13 @@ Pull the default routed model:
 powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 -Mode pull -Model llama3.2:3b
 ```
 
-The backend config map lists `chris-pc-2` first for `llama3.2:3b`, `llama3.1:8b`, and `qwen2.5:14b`. The router still confirms the model is actually installed before choosing the PC.
+The backend config map lists `chris-pc-2` first for `llama3.2:3b`, `llama3.1:8b`, and `qwen2.5:7b`. The router still confirms the model is actually installed before choosing the PC.
 
 ## CHRIS-PC-1 Optional Worker
 
-`CHRIS-PC-1` is integrated using the same external optional Ollama worker pattern.
+`CHRIS-PC-1` is integrated using the external optional Ollama worker pattern,
+but it runs native Windows Ollama instead of Docker Desktop. This keeps the
+worker usable when no desktop session is logged in.
 
 Current endpoint:
 
@@ -96,23 +98,30 @@ Installed model baseline:
 llama3.2:3b
 ```
 
-Install or refresh the CHRIS-PC-1 watcher:
+Install or refresh the CHRIS-PC-1 native watcher:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-local-ollama-worker-controller.ps1 `
-  -TaskName "Local LLM CHRIS-PC-1 Worker Controller" `
+powershell -ExecutionPolicy Bypass -File .\scripts\install-local-ollama-native-worker.ps1 `
   -WorkerName chris-pc-1 `
+  -Namespace local-llm `
   -SwitchDeployment chris-pc-1-ollama-switch `
-  -Service chris-pc-1-ollama `
-  -Container local-llm-chris-pc-1-ollama `
-  -Volume local_llm_chris_pc_1_ollama `
-  -InstallDockerDesktopStartupTask
+  -Models llama3.2:3b `
+  -OllamaTaskName "Local LLM Native Ollama CHRIS-PC-1" `
+  -OllamaTaskUserId "CHRIS-PC-1\chris" `
+  -OllamaTaskLogonType S4U `
+  -OllamaProfileRoot "C:\Users\chris" `
+  -ControllerTaskName "Local LLM CHRIS-PC-1 Native Worker Controller"
 ```
 
-The installer registers interactive logon tasks so Docker Desktop and the
-worker controller run in the active Windows user session. This avoids Docker
-Desktop credential-helper and named-pipe issues that appear in plain SSH
-sessions.
+The installer downloads the standalone Windows Ollama zip, writes
+`C:\ProgramData\LocalLlmWorker\start-ollama.ps1`, opens firewall port `11434`,
+copies the local kubeconfig for the controller, and registers two scheduled
+tasks. The launcher task starts native `ollama.exe serve` as a detached process;
+the controller task watches `chris-pc-1-ollama-switch` and annotates desired and
+actual state back to Kubernetes.
+
+If Ollama and the model are already installed, add `-SkipDownload` and
+`-SkipModelPull` when refreshing the scheduled tasks.
 
 ## Dashboard On/Off Control
 
@@ -129,7 +138,7 @@ Scale that deployment from the Kubernetes dashboard:
 - `replicas: 1` turns the local PC worker on.
 - `replicas: 0` turns the local PC worker off.
 
-The switch pod is intentionally tiny and does not run the model. It gives the Kubernetes control panel a normal Deployment object to scale. A watcher on each Windows PC observes that desired replica count and starts or stops the local Docker Ollama container.
+The switch pod is intentionally tiny and does not run the model. It gives the Kubernetes control panel a normal Deployment object to scale. A watcher on each Windows PC observes that desired replica count and starts or stops the local Ollama runtime, either a Docker Compose service or a native scheduled-task launcher.
 
 Install the watcher on `CHRIS-PC-2`:
 
@@ -137,10 +146,24 @@ Install the watcher on `CHRIS-PC-2`:
 powershell -ExecutionPolicy Bypass -File .\scripts\install-local-ollama-worker-controller.ps1
 ```
 
+Install the native watcher on `CHRIS-PC-1`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-local-ollama-native-worker.ps1 `
+  -WorkerName chris-pc-1 `
+  -SwitchDeployment chris-pc-1-ollama-switch `
+  -OllamaTaskName "Local LLM Native Ollama CHRIS-PC-1" `
+  -OllamaTaskUserId "CHRIS-PC-1\chris" `
+  -OllamaTaskLogonType S4U `
+  -OllamaProfileRoot "C:\Users\chris" `
+  -ControllerTaskName "Local LLM CHRIS-PC-1 Native Worker Controller"
+```
+
 Run one sync manually:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-controller.ps1 -Once
+powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-native-worker-controller.ps1 -Once
 ```
 
 Check the switch state from kubectl:
@@ -164,7 +187,7 @@ Those overrides give the live backend permission to read and scale the `local-ll
 
 The cluster has a `synology-nfs` storage class. Native Linux/K8s Ollama workers use a shared `local-llm/ollama-model-cache` PVC mounted at `/models`, with `OLLAMA_MODELS=/models`. That lets K8s workers share downloaded model files instead of pulling the same model separately on each node.
 
-This is best for native Linux workers. For `CHRIS-PC-2`, which is currently an external Windows Docker worker, keep the local Docker volume unless the Synology model share is mounted into Docker Desktop/WSL first. After that, the optional override can be used:
+This is best for native Linux workers. For `CHRIS-PC-2`, which is currently an external Windows Docker worker, keep the local Docker volume unless the Synology model share is mounted into Docker Desktop/WSL first. `CHRIS-PC-1` uses native Windows Ollama with `C:\ProgramData\Ollama\models`. After that, the optional Docker override can be used:
 
 ```powershell
 $env:OLLAMA_MODELS_PATH = "C:\path\to\mounted\synology\ollama-models"

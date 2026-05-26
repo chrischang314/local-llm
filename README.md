@@ -12,8 +12,10 @@ on", and scaling it to `0` means "turn it off".
 
 Current external workers:
 
-- `chris-pc-2`: `http://192.168.4.24:11434`, RTX 5070, large tier.
-- `chris-pc-1`: `http://192.168.4.27:11434`, RTX 4060, medium tier.
+- `chris-pc-2`: `http://192.168.4.24:11434`, RTX 5070, large tier,
+  Docker Desktop worker.
+- `chris-pc-1`: `http://192.168.4.27:11434`, RTX 4060, medium tier,
+  native Windows Ollama worker.
 
 See `docs/k8s-personal-workers.md` for setup, dashboard switch behavior, and
 worker controller commands.
@@ -24,16 +26,21 @@ worker controller commands.
 # Apply live default-namespace routing overrides.
 .\scripts\deploy-live-default-app-overrides.ps1
 
-# Turn an external Windows worker on or off locally.
+# Turn the Docker Desktop worker on or off locally.
 powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 -Mode on
 powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-mode.ps1 -Mode off
 
-# Run one worker-controller reconciliation.
+# Run one Docker worker-controller reconciliation.
 powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-controller.ps1 -Once
+
+# Run one native Ollama worker-controller reconciliation.
+powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-native-worker-controller.ps1 -Once
 ```
 
-The worker scripts use `.docker-worker/config.json` for unattended Docker calls.
-That directory is intentionally ignored by git.
+The Docker worker scripts use `.docker-worker/config.json` for unattended Docker
+calls. The native worker installer writes runtime files under
+`C:\ProgramData\LocalLlmWorker`. Both locations are local machine state and must
+stay out of git.
 
 ## Health Status
 
