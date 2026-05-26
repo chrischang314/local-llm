@@ -48,6 +48,21 @@ worker summary:
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and available worker capacity.
 
+## Conversation Export
+
+Saved conversations can be exported from the chat header. The export button is
+enabled after a saved conversation with messages is open and downloads a
+Markdown transcript.
+
+The authenticated API also supports:
+
+- `GET /conversations/{id}/export?format=markdown`
+- `GET /conversations/{id}/export?format=json`
+
+Both formats include the conversation title, model, sampling settings, optional
+system prompt, timestamps, and ordered messages. The endpoint only returns
+conversations owned by the signed-in user.
+
 ## Code Change Mode And GitHub Integration
 
 The main workspace includes a gated Code mode for authenticated users. It can

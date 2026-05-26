@@ -53,6 +53,14 @@ stores a generated signing key under the persistent app data directory
 (`/app/data/jwt_secret` in containers). That generated key is runtime state and
 must stay out of git.
 
+## Conversation Portability
+
+Conversation history belongs to the signed-in local user. The export route uses
+the same ownership check as message loading, then serializes the conversation
+metadata, model settings, optional system prompt, and ordered messages. Markdown
+is the default for human-readable notes; JSON is available for scripts or later
+import tooling.
+
 ## Agentic Code Mode
 
 The main workspace has separate Chat and Code modes. Chat remains a
