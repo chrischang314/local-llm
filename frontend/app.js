@@ -397,14 +397,20 @@ function renderGithubStatus() {
   const configured = !!githubStatus?.configured;
   const installation = githubStatus?.connection || githubStatus?.installation;
   const missing = githubStatus?.missing?.length ? ` Missing: ${githubStatus.missing.join(", ")}` : "";
-  const text = connected
-    ? `Connected to ${installation?.account_login || "GitHub"}`
+  const connectedText = `Connected to ${installation?.account_login || "GitHub"}`;
+  const codeText = connected
+    ? connectedText
+    : configured
+      ? "GitHub OAuth ready. Sign in with GitHub to authorize this browser."
+      : "GitHub sign-in needs one-time service setup. Click Sign in with GitHub to open Settings.";
+  const settingsText = connected
+    ? connectedText
     : configured
       ? "GitHub OAuth ready. Sign in with GitHub to authorize this browser."
       : `GitHub OAuth service setup required.${missing}`;
 
-  if (githubStatusText) githubStatusText.textContent = text;
-  if (settingsGithubStatus) settingsGithubStatus.textContent = text;
+  if (githubStatusText) githubStatusText.textContent = codeText;
+  if (settingsGithubStatus) settingsGithubStatus.textContent = settingsText;
   if (githubOauthCallbackUrl && githubStatus?.oauth?.callback_url) {
     githubOauthCallbackUrl.value = githubStatus.oauth.callback_url;
   }
