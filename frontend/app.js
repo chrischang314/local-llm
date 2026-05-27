@@ -88,6 +88,7 @@ const settingsTopPVal = $("settings-top-p-val");
 const settingsTopK = $("settings-top-k");
 const modelListEl = $("model-list");
 const workerListEl = $("worker-list");
+const workerReadinessPanel = $("worker-readiness-panel");
 const pullModelInput = $("pull-model-name");
 const pullModelBtn = $("pull-model-btn");
 const pullProgress = $("pull-progress");
@@ -1567,9 +1568,16 @@ async function refreshModelList() {
 
 async function refreshWorkerList() {
   workerListEl.textContent = "Loading...";
+  renderWorkerReadiness({
+    severity: "warning",
+    state: "checking",
+    summary: "Checking worker readiness...",
+    issues: [],
+  });
   try {
     const data = await apiJson("/workers");
     const workers = data.workers ?? [];
+    renderWorkerReadiness(data.readiness, data.control_error);
     if (!workers.length) {
       workerListEl.textContent = "No workers configured.";
       return;
@@ -1612,7 +1620,69 @@ async function refreshWorkerList() {
     }
   } catch (err) {
     workerListEl.textContent = `Failed to load workers: ${err.message}`;
+    renderWorkerReadiness({
+      severity: "error",
+      state: "unavailable",
+      summary: `Failed to load worker readiness: ${err.message}`,
+      issues: [],
+    });
   }
+}
+
+function renderWorkerReadiness(readiness, fallbackError = "") {
+  if (!workerReadinessPanel) return;
+
+  const allowedSeverities = new Set(["ok", "warning", "error"]);
+  const severity = allowedSeverities.has(readiness?.severity)
+    ? readiness.severity
+    : "warning";
+  const state = readiness?.state
+    ? readiness.state.replace(/_/g, " ")
+    : severity;
+  const summary = readiness?.summary
+    || (fallbackError ? `Worker control unavailable: ${fallbackError}` : "Worker readiness unavailable.");
+  const issues = Array.isArray(readiness?.issues) ? readiness.issues : [];
+
+  workerReadinessPanel.className = `worker-readiness-panel ${severity}`;
+  workerReadinessPanel.innerHTML = "";
+
+  const summaryRow = document.createElement("div");
+  summaryRow.className = "worker-readiness-summary";
+  const badge = document.createElement("span");
+  badge.className = "worker-readiness-badge";
+  badge.textContent = state;
+  const summaryText = document.createElement("span");
+  summaryText.textContent = summary;
+  summaryRow.append(badge, summaryText);
+  workerReadinessPanel.appendChild(summaryRow);
+
+  if (!issues.length) return;
+
+  const issueList = document.createElement("div");
+  issueList.className = "worker-readiness-issues";
+  for (const issue of issues.slice(0, 4)) {
+    const issueEl = document.createElement("div");
+    issueEl.className = `worker-readiness-issue ${issue.severity || "warning"}`;
+
+    const message = document.createElement("strong");
+    message.textContent = issue.message || issue.type || "Worker readiness issue";
+    issueEl.appendChild(message);
+
+    if (issue.next_check) {
+      const nextCheck = document.createElement("span");
+      nextCheck.textContent = issue.next_check;
+      issueEl.appendChild(nextCheck);
+    }
+
+    issueList.appendChild(issueEl);
+  }
+  if (issues.length > 4) {
+    const more = document.createElement("div");
+    more.className = "worker-readiness-more";
+    more.textContent = `${issues.length - 4} more readiness issues`;
+    issueList.appendChild(more);
+  }
+  workerReadinessPanel.appendChild(issueList);
 }
 
 function workerSummary(worker) {

@@ -53,6 +53,15 @@ and a compact worker summary derived from the router's backend health cache.
 The frontend sidebar uses that same response to show `available/enabled`
 workers and active routed requests.
 
+The authenticated `/workers` route is the operational view. It combines router
+health with Kubernetes switch annotations and returns a readiness summary. That
+summary separates capacity from repair clues: unavailable enabled workers,
+desired/actual switch drift, stale controller heartbeats, and worker-control
+RBAC or service-account failures each become explicit issues with a suggested
+next check. The Settings > Workers panel renders those issues above the switch
+buttons so a user can see whether the problem is routing, the PC runtime, or the
+controller loop before opening Kubernetes logs.
+
 ## Authentication
 
 The app uses simple username/password login for a trusted LAN. The browser keeps

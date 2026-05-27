@@ -66,6 +66,7 @@ K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 K8S_NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 WORKER_SWITCH_LABEL = "app.kubernetes.io/component=external-worker-switch"
+WORKER_SYNC_STALE_SECONDS = int(os.getenv("WORKER_SYNC_STALE_SECONDS", "300"))
 
 
 @asynccontextmanager
@@ -237,8 +238,10 @@ async def health():
         "total": 0,
         "enabled": 0,
         "available": 0,
+        "unavailable": 0,
         "busy": 0,
         "loaded_model_count": 0,
+        "readiness": _worker_readiness_summary([], include_issues=False),
     }
     try:
         models = await ollama_router.list_models()
@@ -270,8 +273,166 @@ def _health_worker_summary(models_payload: dict) -> dict:
         "total": len(backends),
         "enabled": len(enabled),
         "available": len(available),
+        "unavailable": len(enabled) - len(available),
         "busy": busy,
         "loaded_model_count": loaded_model_count,
+        "readiness": _worker_readiness_summary(
+            backends,
+            include_issues=False,
+        ),
+    }
+
+
+def _parse_observed_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        observed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if observed.tzinfo is None:
+        return observed.replace(tzinfo=timezone.utc)
+    return observed.astimezone(timezone.utc)
+
+
+def _worker_loaded_model_count(worker: dict) -> int:
+    return len(worker.get("loaded_models") or [])
+
+
+def _worker_sync_pending(worker: dict) -> bool:
+    control = worker.get("control") or {}
+    desired = (control.get("desired_state") or "").lower()
+    actual = (control.get("actual_state") or "").lower()
+    return bool(desired and actual and actual != "unknown" and desired != actual)
+
+
+def _worker_sync_stale(worker: dict, now: datetime | None = None) -> bool:
+    control = worker.get("control") or {}
+    if not control:
+        return False
+    observed_at = _parse_observed_at(control.get("last_observed_at"))
+    if not observed_at:
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - observed_at).total_seconds() > WORKER_SYNC_STALE_SECONDS
+
+
+def _worker_readiness_summary(
+    workers: list[dict],
+    *,
+    control_available: bool = True,
+    control_error: str | None = None,
+    include_issues: bool = True,
+    now: datetime | None = None,
+) -> dict:
+    """Summarize model worker readiness without changing routing behavior."""
+    enabled = [worker for worker in workers if worker.get("enabled")]
+    available = [worker for worker in enabled if worker.get("available")]
+    unavailable = [worker for worker in enabled if not worker.get("available")]
+    pending_sync = [worker for worker in workers if _worker_sync_pending(worker)]
+    stale_sync = [worker for worker in workers if _worker_sync_stale(worker, now=now)]
+    busy = sum(int(worker.get("in_flight") or 0) for worker in workers)
+    loaded_model_count = sum(_worker_loaded_model_count(worker) for worker in workers)
+
+    if not workers:
+        state = "no_workers"
+        severity = "warning"
+    elif not enabled:
+        state = "disabled"
+        severity = "warning"
+    elif not available:
+        state = "offline"
+        severity = "error"
+    elif unavailable or pending_sync or stale_sync or not control_available:
+        state = "degraded"
+        severity = "warning"
+    else:
+        state = "ready"
+        severity = "ok"
+
+    if not workers:
+        parts = ["No workers configured"]
+    elif not enabled:
+        parts = ["No workers enabled"]
+    else:
+        worker_word = "worker" if len(enabled) == 1 else "workers"
+        parts = [f"{len(available)}/{len(enabled)} enabled {worker_word} available"]
+    if busy:
+        parts.append(f"{busy} active requests")
+    if loaded_model_count:
+        model_word = "model" if loaded_model_count == 1 else "models"
+        parts.append(f"{loaded_model_count} resident {model_word}")
+    if pending_sync:
+        parts.append(f"{len(pending_sync)} switch sync pending")
+    if stale_sync:
+        parts.append(f"{len(stale_sync)} stale controller heartbeat")
+    if control_error:
+        parts.append("worker control unavailable")
+
+    issues = []
+    if include_issues and control_error:
+        issues.append({
+            "type": "control_unavailable",
+            "severity": "warning",
+            "message": f"Worker switch control is unavailable: {control_error}",
+            "next_check": "Check the backend Kubernetes service-account token and worker switch RBAC.",
+        })
+    if include_issues:
+        for worker in pending_sync:
+            control = worker.get("control") or {}
+            issues.append({
+                "type": "sync_pending",
+                "severity": "warning",
+                "worker": worker.get("name"),
+                "message": (
+                    f"{worker.get('name')} switch wants {control.get('desired_state')} "
+                    f"but the controller reports {control.get('actual_state')}."
+                ),
+                "next_check": "Run the worker controller once or inspect its scheduled task logs.",
+            })
+        for worker in stale_sync:
+            issues.append({
+                "type": "sync_stale",
+                "severity": "warning",
+                "worker": worker.get("name"),
+                "message": f"{worker.get('name')} controller heartbeat is stale.",
+                "next_check": "Check whether the worker controller scheduled task is still running.",
+            })
+        for worker in unavailable:
+            issues.append({
+                "type": "worker_unavailable",
+                "severity": "error" if not available else "warning",
+                "worker": worker.get("name"),
+                "message": f"{worker.get('name')} is enabled but Ollama is not reachable.",
+                "next_check": "Check the worker runtime, firewall, and Ollama /api/tags endpoint.",
+            })
+        for worker in workers:
+            if worker.get("available") and worker.get("runtime_error"):
+                issues.append({
+                    "type": "runtime_status_unavailable",
+                    "severity": "warning",
+                    "worker": worker.get("name"),
+                    "message": f"{worker.get('name')} is reachable but resident model status failed.",
+                    "next_check": "Check the worker's Ollama /api/ps endpoint.",
+                })
+
+    return {
+        "state": state,
+        "severity": severity,
+        "summary": "; ".join(parts),
+        "total": len(workers),
+        "enabled": len(enabled),
+        "available": len(available),
+        "unavailable": len(unavailable),
+        "busy": busy,
+        "loaded_model_count": loaded_model_count,
+        "pending_sync": len(pending_sync),
+        "stale_sync": len(stale_sync),
+        "control_available": control_available,
+        "issues": issues,
     }
 
 
@@ -675,6 +836,11 @@ async def list_workers(_: dict = Depends(current_user)):
 
     return {
         "workers": workers,
+        "readiness": _worker_readiness_summary(
+            workers,
+            control_available=control_error is None,
+            control_error=control_error,
+        ),
         "control_available": control_error is None,
         "control_error": control_error,
     }

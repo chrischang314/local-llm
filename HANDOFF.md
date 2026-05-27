@@ -5,8 +5,12 @@
 - `chris-pc-1` is registered as an optional external Ollama worker at
   `http://192.168.4.27:11434`.
 - `/health` now includes a `workers` summary with total, enabled, available,
-  busy, and loaded model counts. The frontend sidebar renders this as
-  model count plus worker availability.
+  unavailable, busy, loaded model counts, and a compact readiness state. The
+  frontend sidebar renders this as model count plus worker availability.
+- The authenticated `/workers` response now includes a readiness summary with
+  actionable issue rows for unavailable enabled workers, switch sync mismatches,
+  stale controller heartbeats, and worker-control access failures. Settings >
+  Workers renders the summary above the worker switch list.
 - Assistant messages now store and display route metadata in the chat UI
   (`backend_name`, `model`, and `model_status`) so saved conversations show
   which worker handled each reply.
@@ -113,6 +117,7 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 ## Verification Notes
 
 - Focused health unit coverage lives in `tests/test_health.py`.
+- Worker readiness summary coverage also lives in `tests/test_health.py`.
 - Conversation export unit and route coverage lives in
   `tests/test_conversation_export.py`.
 - Chat route-metadata serialization coverage lives in

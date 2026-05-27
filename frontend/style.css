@@ -1438,6 +1438,88 @@ svg {
   gap: 8px;
 }
 
+.worker-readiness-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.84rem;
+}
+
+.worker-readiness-panel.ok {
+  background: #edf8f2;
+  border-color: #b9e4c9;
+}
+
+.worker-readiness-panel.warning {
+  background: #fff7e6;
+  border-color: #ffe2aa;
+}
+
+.worker-readiness-panel.error {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.worker-readiness-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.worker-readiness-summary span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.worker-readiness-badge {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.worker-readiness-panel.ok .worker-readiness-badge {
+  color: var(--accent);
+}
+
+.worker-readiness-panel.warning .worker-readiness-badge {
+  color: var(--warning);
+}
+
+.worker-readiness-panel.error .worker-readiness-badge {
+  color: var(--danger);
+}
+
+.worker-readiness-issues {
+  display: grid;
+  gap: 6px;
+}
+
+.worker-readiness-issue {
+  display: grid;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(17, 24, 39, 0.08);
+}
+
+.worker-readiness-issue strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.worker-readiness-issue span,
+.worker-readiness-more {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .model-list .row,
 .worker-list .row {
   min-height: 42px;
