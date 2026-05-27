@@ -85,7 +85,7 @@ connect to GitHub from the website, list authorized repositories and branches,
 and queue agentic coding jobs that run inside isolated Kubernetes Jobs.
 
 The normal connection path is GitHub OAuth. Configure one service OAuth App in
-Code mode using the displayed callback URL
+Settings > Integrations > GitHub service setup using the displayed callback URL
 (`http://localllm.lan/github/oauth/callback` on the LAN deployment). Local LLM
 stores that Client ID and Client Secret encrypted in SQLite. After that, every
 Local LLM user gets a normal **Sign in with GitHub** button: it redirects to

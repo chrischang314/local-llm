@@ -5,8 +5,10 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -22,7 +24,15 @@ import github_client  # noqa: E402
 import github_routes  # noqa: E402
 import secret_store  # noqa: E402
 from database import Base  # noqa: E402
-from models import AgentJob, GitHubInstallation, GitHubOAuthConfig, GitHubOAuthServiceConfig, User  # noqa: E402
+from models import (  # noqa: E402
+    AgentJob,
+    GitHubInstallation,
+    GitHubInstallState,
+    GitHubOAuthConfig,
+    GitHubOAuthServiceConfig,
+    User,
+    utcnow,
+)
 
 
 class AgentServiceTests(unittest.TestCase):
@@ -351,6 +361,90 @@ class GitHubOAuthTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(config, GitHubOAuthServiceConfig)
             self.assertEqual(config.client_id, "client-123")
 
+        await engine.dispose()
+
+    async def test_oauth_callback_keeps_tokens_separate_per_local_user(self):
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with session_factory() as db:
+            db.add_all(
+                [
+                    User(id=1, username="alice", password_hash="hash"),
+                    User(id=2, username="bob", password_hash="hash"),
+                    GitHubOAuthServiceConfig(
+                        id=1,
+                        client_id="client-123",
+                        client_secret_encrypted=secret_store.encrypt_secret("secret-123"),
+                    ),
+                    GitHubInstallState(
+                        user_id=1,
+                        state="state-alice",
+                        expires_at=utcnow() + timedelta(minutes=5),
+                    ),
+                    GitHubInstallState(
+                        user_id=2,
+                        state="state-bob",
+                        expires_at=utcnow() + timedelta(minutes=5),
+                    ),
+                ]
+            )
+            await db.commit()
+
+        class FakeRequest:
+            def url_for(self, _name):
+                return "http://localllm.lan/github/oauth/callback"
+
+        async def fake_exchange_oauth_code(**kwargs):
+            return {
+                "access_token": f"token-for-{kwargs['code']}",
+                "scope": "repo",
+                "token_type": "bearer",
+            }
+
+        async def fake_oauth_user(token):
+            suffix = token.rsplit("-", 1)[-1]
+            return {"login": f"github-{suffix}", "id": suffix, "type": "User"}
+
+        original_exchange = github_routes.github_app_client.exchange_oauth_code
+        original_user = github_routes.github_app_client.oauth_user
+        github_routes.github_app_client.exchange_oauth_code = fake_exchange_oauth_code
+        github_routes.github_app_client.oauth_user = fake_oauth_user
+        try:
+            async with session_factory() as db:
+                await github_routes.github_oauth_callback(
+                    FakeRequest(),
+                    code="alice",
+                    state="state-alice",
+                    db=db,
+                )
+                await github_routes.github_oauth_callback(
+                    FakeRequest(),
+                    code="bob",
+                    state="state-bob",
+                    db=db,
+                )
+        finally:
+            github_routes.github_app_client.exchange_oauth_code = original_exchange
+            github_routes.github_app_client.oauth_user = original_user
+
+        async with session_factory() as db:
+            rows = (
+                await db.execute(select(GitHubInstallation).order_by(GitHubInstallation.user_id))
+            ).scalars().all()
+
+        self.assertEqual([row.user_id for row in rows], [1, 2])
+        self.assertEqual([row.account_login for row in rows], ["github-alice", "github-bob"])
+        self.assertEqual(
+            [secret_store.decrypt_secret(row.access_token_encrypted) for row in rows],
+            ["token-for-alice", "token-for-bob"],
+        )
         await engine.dispose()
 
     async def test_user_supplied_oauth_token_is_encrypted_and_reusable_for_runner(self):

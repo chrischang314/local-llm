@@ -1141,6 +1141,20 @@ svg {
   display: none;
 }
 
+.settings-oauth-setup {
+  margin-top: 12px;
+}
+
+.settings-oauth-setup summary {
+  cursor: pointer;
+  color: var(--muted-strong);
+  font-weight: 800;
+}
+
+.settings-oauth-setup[open] {
+  display: grid;
+}
+
 .code-job-form label,
 .github-oauth-setup label {
   min-width: 0;

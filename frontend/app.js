@@ -377,7 +377,7 @@ function getAgentDisabledReason() {
 function getGithubSetupMessage() {
   const missing = githubStatus?.missing || [];
   if (!missing.length) return "Sign in with GitHub before running code changes.";
-  return `GitHub service OAuth setup is required: ${missing.join(", ")}.`;
+  return `GitHub service setup is required before sign-in. Missing: ${missing.join(", ")}.`;
 }
 
 async function refreshGithubStatus() {
@@ -408,17 +408,12 @@ function renderGithubStatus() {
   if (githubOauthCallbackUrl && githubStatus?.oauth?.callback_url) {
     githubOauthCallbackUrl.value = githubStatus.oauth.callback_url;
   }
-  if (githubOauthSetup) {
-    githubOauthSetup.classList.toggle("hidden", configured);
-  }
   [githubConnectBtn, settingsGithubConnect].forEach((button) => {
     if (!button) return;
-    button.disabled = !configured;
+    button.disabled = false;
     button.querySelector("span").textContent = connected
       ? "Reconnect GitHub"
-      : configured
-        ? "Sign in with GitHub"
-        : "Sign in with GitHub";
+      : "Sign in with GitHub";
   });
 }
 
@@ -451,7 +446,7 @@ async function saveGithubOAuthConfig({ silent = false } = {}) {
 async function startGithubInstall() {
   try {
     if (!githubStatus?.configured) {
-      alert(getGithubSetupMessage());
+      await showGithubServiceSetupRequired();
       return;
     }
     const data = await apiJson("/github/oauth/start", { method: "POST" });
@@ -462,6 +457,14 @@ async function startGithubInstall() {
     window.location.href = data.auth_url;
   } catch (err) {
     alert(`GitHub connect failed: ${err.message}`);
+  }
+}
+
+async function showGithubServiceSetupRequired() {
+  await openSettings();
+  if (githubOauthSetup) githubOauthSetup.open = true;
+  if (githubOauthConfigStatus) {
+    githubOauthConfigStatus.textContent = getGithubSetupMessage();
   }
 }
 

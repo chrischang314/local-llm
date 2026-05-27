@@ -28,15 +28,17 @@
   off.
 - A gated Code mode now exists in the main workspace for GitHub-backed code
   execution. The normal connection path is service-configured GitHub OAuth: one
-  Local LLM operator saves the OAuth App Client ID/Secret in Code mode, then
-  every Local LLM user clicks **Sign in with GitHub** for the GitHub authorize
-  redirect and gets their own encrypted token. The backend exposes `/github/*`
-  and `/agent/*`, nginx proxies both prefixes, and the runner image lives in
+  Local LLM operator saves the OAuth App Client ID/Secret in the collapsed
+  Settings > Integrations service setup panel, then every Local LLM user clicks
+  **Sign in with GitHub** in Code mode for the GitHub authorize redirect and
+  gets their own encrypted token. The backend exposes `/github/*` and
+  `/agent/*`, nginx proxies both prefixes, and the runner image lives in
   `agent-runner/`.
 - `AGENT_JOBS_ENABLED` should remain `false` until the live
   `local-llm-sandbox` NetworkPolicy and canary checks pass. The UI will show the
   feature as disabled but still lets users inspect GitHub connection state,
-  enter OAuth keys, and complete GitHub sign-in.
+  complete GitHub sign-in, and use the collapsed service setup panel if the
+  shared OAuth App has not been configured.
 - Saved conversations now have an authenticated export path:
   `GET /conversations/{id}/export?format=markdown|json`. The chat header export
   button downloads Markdown for the active saved conversation.
