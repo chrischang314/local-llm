@@ -51,7 +51,8 @@ The unauthenticated `/health` route is intentionally lightweight enough for
 dashboards and launchpad checks. It reports backend status, Ollama model count,
 and a compact worker summary derived from the router's backend health cache.
 The frontend sidebar uses that same response to show `available/enabled`
-workers and active routed requests.
+workers and active routed requests. Worker readiness warning/error severity
+changes the compact sidebar indicator even when Ollama itself is still up.
 
 The authenticated `/workers` route is the operational view. It combines router
 health with Kubernetes switch annotations and returns a readiness summary. That

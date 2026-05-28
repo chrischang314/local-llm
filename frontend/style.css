@@ -438,6 +438,15 @@ svg {
   background: #22c55e;
 }
 
+.health-indicator.warning {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.48);
+}
+
+.health-indicator.warning .dot {
+  background: #f59e0b;
+}
+
 .health-indicator.down .dot {
   background: #ef4444;
 }

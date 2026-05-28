@@ -372,6 +372,18 @@ def _worker_readiness_summary(
     if control_error:
         parts.append("worker control unavailable")
 
+    public_issue_count = (
+        len(pending_sync)
+        + len(stale_sync)
+        + len(unavailable)
+        + sum(
+            1
+            for worker in workers
+            if worker.get("available") and worker.get("runtime_error")
+        )
+        + (1 if control_error else 0)
+    )
+
     issues = []
     if include_issues and control_error:
         issues.append({
@@ -432,6 +444,7 @@ def _worker_readiness_summary(
         "pending_sync": len(pending_sync),
         "stale_sync": len(stale_sync),
         "control_available": control_available,
+        "issue_count": public_issue_count,
         "issues": issues,
     }
 

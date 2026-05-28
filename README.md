@@ -54,9 +54,13 @@ worker summary:
 - `workers.loaded_model_count`: resident models across all configured workers.
 - `workers.readiness`: a compact state, severity, and summary for launchpad or
   sidebar status.
+- `workers.readiness.issue_count`: non-sensitive count of readiness issues
+  behind the compact summary.
 
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
-model count and available worker capacity.
+model count and the worker readiness severity/summary. If Ollama is up but
+enabled worker capacity is degraded, the sidebar switches to a warning state
+instead of looking fully healthy.
 
 The authenticated `GET /workers` endpoint also returns a `readiness` object with
 issue details and suggested next checks for switch sync mismatches, stale worker

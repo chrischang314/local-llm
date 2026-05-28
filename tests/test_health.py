@@ -59,6 +59,11 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["workers"]["loaded_model_count"], 2)
         self.assertEqual(payload["workers"]["readiness"]["state"], "degraded")
         self.assertEqual(payload["workers"]["readiness"]["severity"], "warning")
+        self.assertEqual(
+            payload["workers"]["readiness"]["summary"],
+            "1/2 enabled workers available; 3 active requests; 2 resident models",
+        )
+        self.assertEqual(payload["workers"]["readiness"]["issue_count"], 1)
         self.assertEqual(payload["workers"]["readiness"]["issues"], [])
 
     async def test_health_returns_empty_worker_summary_when_router_fails(self):
@@ -82,6 +87,7 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["workers"]["busy"], 0)
         self.assertEqual(payload["workers"]["loaded_model_count"], 0)
         self.assertEqual(payload["workers"]["readiness"]["state"], "no_workers")
+        self.assertEqual(payload["workers"]["readiness"]["issue_count"], 0)
 
     async def test_workers_endpoint_includes_readiness_issues(self):
         now = datetime.now(timezone.utc)
@@ -144,6 +150,7 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["readiness"]["unavailable"], 1)
         self.assertEqual(payload["readiness"]["pending_sync"], 1)
         self.assertEqual(payload["readiness"]["stale_sync"], 1)
+        self.assertEqual(payload["readiness"]["issue_count"], 3)
         issue_types = {issue["type"] for issue in payload["readiness"]["issues"]}
         self.assertIn("sync_pending", issue_types)
         self.assertIn("sync_stale", issue_types)
