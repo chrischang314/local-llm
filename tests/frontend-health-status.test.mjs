@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { createRequire } from "node:module";
 
@@ -69,4 +70,17 @@ test("compact health label stays down when Ollama is unreachable", () => {
     className: "down",
     label: "Ollama unreachable - 0 models - 1/2 enabled workers available",
   });
+});
+
+test("nginx API proxy does not capture health-status static asset", () => {
+  const nginxConfig = fs.readFileSync(
+    new URL("../frontend/nginx.conf", import.meta.url),
+    "utf8",
+  );
+  const route = nginxConfig.match(/location ~ \^\/\(([^)]+)\)\(\/\|\$\)/);
+  assert.ok(route, "API proxy route should require a slash or end after the prefix");
+
+  const apiRoute = new RegExp(`^/(${route[1]})(/|$)`);
+  assert.equal(apiRoute.test("/health"), true);
+  assert.equal(apiRoute.test("/health-status.js"), false);
 });
