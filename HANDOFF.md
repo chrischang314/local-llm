@@ -2,6 +2,13 @@
 
 ## Current State
 
+- The frontend runtime libraries are vendored under `frontend/vendor/` and
+  loaded from same-origin paths. Keep Marked, DOMPurify, Highlight.js, and
+  Lucide pinned there; the static frontend test fails if `index.html` or
+  `docs.html` drifts back to CDN URLs or `@latest`.
+- `docs.html` presents `http://localllm.lan/v1` as the primary LAN
+  OpenAI-compatible base URL and keeps `http://localhost:8001/v1` as the
+  Compose/dev alternate.
 - `chris-pc-1` is registered as an optional external Ollama worker at
   `http://192.168.4.27:11434`.
 - `/health` now includes a `workers` summary with total, enabled, available,
@@ -124,7 +131,8 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
 - Focused health unit coverage lives in `tests/test_health.py`.
 - Worker readiness summary coverage also lives in `tests/test_health.py`.
 - Compact sidebar health-label coverage lives in
-  `tests/frontend-health-status.test.mjs`.
+  `tests/frontend-health-status.test.mjs`. That same Node test now guards
+  frontend asset vendoring and LAN-first docs ordering.
 - Conversation export unit and route coverage lives in
   `tests/test_conversation_export.py`.
 - Chat route-metadata serialization coverage lives in

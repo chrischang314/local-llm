@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const healthStatus = require("../frontend/health-status.js");
+const frontendRoot = new URL("../frontend/", import.meta.url);
 
 test("compact health label stays ready when Ollama and workers are ready", () => {
   const payload = {
@@ -83,4 +84,42 @@ test("nginx API proxy does not capture health-status static asset", () => {
   const apiRoute = new RegExp(`^/(${route[1]})(/|$)`);
   assert.equal(apiRoute.test("/health"), true);
   assert.equal(apiRoute.test("/health-status.js"), false);
+});
+
+test("runtime HTML uses same-origin pinned frontend assets", () => {
+  const pages = ["index.html", "docs.html"];
+  const requiredAssets = [
+    "vendor/lucide-1.17.0.min.js",
+    "vendor/marked-4.3.0.min.js",
+    "vendor/dompurify-3.4.7.min.js",
+    "vendor/highlight-github-dark-11.10.0.min.css",
+    "vendor/highlight-11.10.0.min.js",
+  ];
+
+  for (const page of pages) {
+    const html = fs.readFileSync(new URL(page, frontendRoot), "utf8");
+    assert.doesNotMatch(html, /https?:\/\/(?:cdn\.jsdelivr\.net|unpkg\.com)/);
+    assert.doesNotMatch(html, /@latest/);
+    assert.match(html, /vendor\/lucide-1\.17\.0\.min\.js/);
+  }
+
+  const indexHtml = fs.readFileSync(new URL("index.html", frontendRoot), "utf8");
+  for (const asset of requiredAssets) {
+    assert.equal(
+      fs.existsSync(new URL(asset, frontendRoot)),
+      true,
+      `${asset} should be vendored with the frontend`,
+    );
+    assert.match(indexHtml, new RegExp(asset.replaceAll(".", "\\.")));
+  }
+});
+
+test("docs present the LAN base URL before the Compose development URL", () => {
+  const docsHtml = fs.readFileSync(new URL("docs.html", frontendRoot), "utf8");
+  const lanIndex = docsHtml.indexOf("http://localllm.lan/v1");
+  const devIndex = docsHtml.indexOf("http://localhost:8001/v1");
+
+  assert.notEqual(lanIndex, -1);
+  assert.notEqual(devIndex, -1);
+  assert.equal(lanIndex < devIndex, true);
 });
