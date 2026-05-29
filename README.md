@@ -68,6 +68,11 @@ controller heartbeats, unreachable enabled workers, and worker-control access
 problems. The Settings > Workers panel shows that summary above the worker
 switches.
 
+The legacy `local-llm` namespace backend is a PVC-backed singleton used for
+worker-control support. Its Kubernetes manifest uses a `Recreate` rollout and a
+5-second `/health` readiness timeout because worker health checks can briefly
+wait on external Windows Ollama hosts.
+
 ## Conversation Export
 
 Saved conversations can be exported from the chat header. The export button is

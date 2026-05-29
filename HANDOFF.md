@@ -17,6 +17,10 @@
   which worker handled each reply.
 - `chris-pc-1-ollama-switch` lives in the `local-llm` namespace and is currently
   the Kubernetes on/off switch for that PC.
+- The legacy backend in the `local-llm` namespace is a PVC-backed singleton.
+  Keep `k8s/local-llm/backend.yaml` on `strategy.type: Recreate`, and keep the
+  `/health` readiness timeout above the Kubernetes 1-second default because the
+  endpoint summarizes external worker state.
 - Login tokens are stored in browser `localStorage`. The backend signs them
   with `JWT_SECRET` when set, otherwise it generates and reuses
   `/app/data/jwt_secret` on the persistent chat-data volume.
