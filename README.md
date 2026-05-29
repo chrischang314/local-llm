@@ -35,12 +35,29 @@ powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-worker-controlle
 
 # Run one native Ollama worker-controller reconciliation.
 powershell -ExecutionPolicy Bypass -File .\scripts\local-ollama-native-worker-controller.ps1 -Once
+
+# Refresh pinned same-origin frontend vendor assets after npm dependency updates.
+npm install
+npm run vendor:frontend
 ```
 
 The Docker worker scripts use `.docker-worker/config.json` for unattended Docker
 calls. The native worker installer writes runtime files under
 `C:\ProgramData\LocalLlmWorker`. Both locations are local machine state and must
 stay out of git.
+
+## Frontend Assets And API Docs
+
+The chat page and API docs serve Marked, DOMPurify, Highlight.js, and Lucide
+from `frontend/vendor/` instead of runtime CDN URLs, so the LAN UI keeps
+rendering when public asset CDNs are unreachable. Dependency versions are pinned
+in `package-lock.json`; after changing them, run `npm install` and
+`npm run vendor:frontend`, then commit only the refreshed files under
+`frontend/vendor/`, not `node_modules/`.
+
+The API docs use `http://localllm.lan/v1` as the primary OpenAI-compatible base
+URL for the LAN deployment. `http://localhost:8001/v1` remains documented as
+the Docker Compose and local development fallback.
 
 ## Health Status
 

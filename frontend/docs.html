@@ -6,7 +6,7 @@
   <title>API Docs - Local LLM</title>
   <link rel="stylesheet" href="style.css?v=20260518-ui" />
   <link rel="stylesheet" href="docs.css?v=20260518-ui" />
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="vendor/lucide/0.468.0/lucide.min.js"></script>
 </head>
 <body>
   <div class="docs-layout">
@@ -49,15 +49,24 @@
           <span class="section-icon"><i data-lucide="link" aria-hidden="true"></i></span>
           <h2>Base URL</h2>
         </div>
-        <p>Docker compose exposes the backend on port <code>8001</code>.</p>
+        <p>
+          The LAN deployment serves the OpenAI-compatible API from the same app
+          host. Docker Compose still exposes the backend on port <code>8001</code>
+          for development.
+        </p>
 
         <div class="code-block">
-          <div class="code-label">OpenAI SDK base URL</div>
+          <div class="code-label">LAN OpenAI SDK base URL</div>
+          <pre><code>http://localllm.lan/v1</code></pre>
+        </div>
+
+        <div class="code-block">
+          <div class="code-label">Compose/dev OpenAI SDK base URL</div>
           <pre><code>http://localhost:8001/v1</code></pre>
         </div>
 
         <div class="code-block">
-          <div class="code-label">FastAPI explorer</div>
+          <div class="code-label">Compose/dev FastAPI explorer</div>
           <pre><code>http://localhost:8001/docs</code></pre>
         </div>
       </section>
@@ -264,11 +273,11 @@ data: [DONE]</code></pre>
         </div>
         <div class="code-block">
           <div class="code-label">List models</div>
-          <pre><code>curl http://localhost:8001/v1/models</code></pre>
+          <pre><code>curl http://localllm.lan/v1/models</code></pre>
         </div>
         <div class="code-block">
           <div class="code-label">Chat</div>
-          <pre><code>curl http://localhost:8001/v1/chat/completions \
+          <pre><code>curl http://localllm.lan/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "llama3.2:3b",
@@ -279,7 +288,7 @@ data: [DONE]</code></pre>
         </div>
         <div class="code-block">
           <div class="code-label">Streaming</div>
-          <pre><code>curl http://localhost:8001/v1/chat/completions \
+          <pre><code>curl http://localllm.lan/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "llama3.2:3b",
@@ -301,7 +310,7 @@ data: [DONE]</code></pre>
           <pre><code>from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8001/v1",
+    base_url="http://localllm.lan/v1",
     api_key="not-needed",
 )
 
@@ -324,7 +333,7 @@ print(response.choices[0].message.content)</code></pre>
         </div>
         <div class="code-block">
           <div class="code-label">fetch</div>
-          <pre><code>const response = await fetch("http://localhost:8001/v1/chat/completions", {
+          <pre><code>const response = await fetch("http://localllm.lan/v1/chat/completions", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({

@@ -80,6 +80,19 @@ metadata, model settings, optional system prompt, and ordered messages. Markdown
 is the default for human-readable notes; JSON is available for scripts or later
 import tooling.
 
+## Frontend Asset Reliability
+
+The LAN UI should not require public CDNs during normal page load. Browser
+libraries for Markdown rendering, HTML sanitization, syntax highlighting, and
+icons are pinned in `package-lock.json`, copied into `frontend/vendor/`, and
+served by the same nginx frontend image as the application HTML. This removes
+runtime drift from URLs such as `lucide@latest` and keeps the chat and docs
+pages usable when internet access is unavailable but the LAN is healthy.
+
+When changing a browser library version, update the pinned npm dependency,
+refresh `frontend/vendor/`, and run the static frontend test that checks both
+HTML pages for CDN references and missing vendored assets.
+
 ## Agentic Code Mode
 
 The main workspace has separate Chat and Code modes. Chat remains a

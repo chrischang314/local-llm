@@ -1,0 +1,15 @@
+{
+  "name": "local-llm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local LLM frontend asset tooling",
+  "scripts": {
+    "vendor:frontend": "node scripts/vendor-frontend-assets.mjs"
+  },
+  "devDependencies": {
+    "@highlightjs/cdn-assets": "11.10.0",
+    "dompurify": "3.4.7",
+    "lucide": "0.468.0",
+    "marked": "4.3.0"
+  }
+}
