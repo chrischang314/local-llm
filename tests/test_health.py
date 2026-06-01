@@ -234,6 +234,26 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sync_stale", issue_types)
         self.assertIn("worker_unavailable", issue_types)
 
+    def test_worker_switch_desired_state_uses_replicas(self):
+        switch = main._serialize_worker_switch({
+            "metadata": {
+                "name": "chris-pc-1-ollama-switch",
+                "namespace": "local-llm",
+                "labels": {"local-llm.io/worker": "chris-pc-1"},
+                "annotations": {
+                    "local-llm.io/desired-state": "off",
+                    "local-llm.io/actual-state": "off",
+                },
+            },
+            "spec": {"replicas": 1},
+            "status": {"readyReplicas": 1},
+        })
+
+        self.assertEqual(switch["desired_replicas"], 1)
+        self.assertEqual(switch["desired_state"], "on")
+        self.assertEqual(switch["controller_desired_state"], "off")
+        self.assertTrue(main._worker_sync_pending({"control": switch}))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -844,13 +844,15 @@ def _serialize_worker_switch(deployment: dict) -> dict:
     spec = deployment.get("spec", {})
     status = deployment.get("status", {})
     replicas = int(spec.get("replicas") or 0)
+    desired_state = "on" if replicas > 0 else "off"
     return {
         "worker": labels.get("local-llm.io/worker") or metadata.get("name"),
         "deployment": metadata.get("name"),
         "namespace": metadata.get("namespace"),
         "desired_replicas": replicas,
         "ready_replicas": int(status.get("readyReplicas") or 0),
-        "desired_state": annotations.get("local-llm.io/desired-state") or ("on" if replicas > 0 else "off"),
+        "desired_state": desired_state,
+        "controller_desired_state": annotations.get("local-llm.io/desired-state"),
         "actual_state": annotations.get("local-llm.io/actual-state") or "unknown",
         "last_observed_at": annotations.get("local-llm.io/last-observed-at"),
     }
