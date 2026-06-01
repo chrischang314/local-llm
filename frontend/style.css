@@ -845,6 +845,12 @@ svg {
   margin: 4px 0;
 }
 
+.message.assistant .bubble :where(p, li, blockquote, th, td, a) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 .message.assistant .bubble code {
   padding: 2px 6px;
   color: #7c2d12;
@@ -857,6 +863,7 @@ svg {
 
 .message.assistant .bubble pre {
   position: relative;
+  max-width: 100%;
   margin: 12px 0;
   padding: 14px;
   overflow-x: auto;
@@ -864,6 +871,11 @@ svg {
   background: #17211d;
   border: 1px solid #26352f;
   border-radius: 8px;
+}
+
+.message.assistant .bubble pre,
+.message.assistant .bubble pre code {
+  white-space: pre;
 }
 
 .message.assistant .bubble pre code {
@@ -880,9 +892,26 @@ svg {
   border-left: 3px solid var(--accent);
 }
 
-.message.assistant .bubble table {
+.message.assistant .bubble .markdown-table-scroll {
   width: 100%;
+  max-width: 100%;
   margin: 12px 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.message.assistant .bubble .markdown-table-scroll:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.18);
+  outline-offset: 2px;
+}
+
+.message.assistant .bubble table {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  margin: 0;
   border-collapse: collapse;
   font-size: 0.92rem;
 }
@@ -892,10 +921,31 @@ svg {
   padding: 8px 10px;
   text-align: left;
   border: 1px solid var(--line);
+  vertical-align: top;
 }
 
 .message.assistant .bubble th {
   background: var(--surface-soft);
+}
+
+.message.assistant .bubble img,
+.message.assistant .bubble video,
+.message.assistant .bubble canvas,
+.message.assistant .bubble svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.message.assistant .bubble img,
+.message.assistant .bubble video {
+  display: block;
+  margin: 12px 0;
+  border-radius: 8px;
+}
+
+.message.assistant .bubble audio {
+  width: 100%;
+  max-width: 100%;
 }
 
 .message.assistant .bubble hr {
@@ -1700,6 +1750,25 @@ svg {
   .message.user .bubble,
   .message.assistant .bubble {
     width: 100%;
+  }
+
+  .message.assistant .bubble {
+    max-width: 100%;
+  }
+
+  .message.assistant .bubble .markdown-table-scroll {
+    margin-left: -2px;
+    margin-right: -2px;
+    width: calc(100% + 4px);
+  }
+
+  .message.assistant .bubble table {
+    font-size: 0.86rem;
+  }
+
+  .message.assistant .bubble th,
+  .message.assistant .bubble td {
+    padding: 7px 8px;
   }
 
   .composer-wrap {

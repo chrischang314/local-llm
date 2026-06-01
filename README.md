@@ -59,6 +59,14 @@ The API docs use `http://localllm.lan/v1` as the primary OpenAI-compatible base
 URL for the LAN deployment. `http://localhost:8001/v1` remains documented as
 the Docker Compose and local development fallback.
 
+## Chat Rendering
+
+Assistant Markdown is sanitized before display and then enhanced for responsive
+chat use. Wide tables render in a horizontal scroll region inside the message
+bubble instead of forcing the mobile viewport wider. Code blocks, images, video,
+audio controls, long links, and long cell text are constrained to the bubble so
+saved and live-streamed replies remain readable on phones and desktop browsers.
+
 ## Health Status
 
 `GET /health` returns the backend state, Ollama model count, and a compact

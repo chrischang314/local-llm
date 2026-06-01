@@ -17,6 +17,10 @@
 - Assistant messages now store and display route metadata in the chat UI
   (`backend_name`, `model`, and `model_status`) so saved conversations show
   which worker handled each reply.
+- Assistant Markdown now gets a post-render enhancement pass. Tables are wrapped
+  in `.markdown-table-scroll`, media/long links are constrained to the chat
+  bubble, and the same pass runs while responses stream so mobile and desktop
+  rendering stay consistent.
 - `chris-pc-1-ollama-switch` lives in the `local-llm` namespace and is currently
   the Kubernetes on/off switch for that PC.
 - The legacy backend in the `local-llm` namespace is a PVC-backed singleton.
@@ -140,6 +144,8 @@ kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
   `tests/test_conversation_export.py`.
 - Chat route-metadata serialization coverage lives in
   `tests/test_chat_metadata.py`.
+- Chat rich-content responsiveness was manually verified against a local static
+  server with desktop and mobile browser viewports.
 - Agent feature coverage lives in `tests/test_agent_features.py`.
 - For a live smoke check, call `http://localllm.lan/health` and confirm the
   `workers` object is present, then open the chat UI and inspect the sidebar

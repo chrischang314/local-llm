@@ -93,6 +93,11 @@ served by the same nginx frontend image as the application HTML. This removes
 runtime drift from URLs such as `lucide@latest` and keeps the chat and docs
 pages usable when internet access is unavailable but the LAN is healthy.
 
+Assistant Markdown is rendered as sanitized HTML and then enhanced in
+`frontend/app.js` before it is shown in the chat. Keep the enhancement pass
+responsible for viewport-sensitive markup, such as wrapping wide tables and
+normalizing media/link behavior, while CSS owns sizing and overflow rules.
+
 When changing a browser library version, update the pinned npm dependency,
 refresh `frontend/vendor/`, and run the static frontend test that checks both
 HTML pages for CDN references and missing vendored assets.

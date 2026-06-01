@@ -1046,8 +1046,46 @@ function renderMarkdown(content) {
   return DOMPurify.sanitize(marked.parse(content));
 }
 
-// Enhance a freshly-rendered assistant bubble: syntax-highlight code,
-// and inject a copy button into each <pre>.
+// Enhance a freshly-rendered assistant bubble so rich Markdown stays usable
+// inside the chat column on narrow and wide screens.
+function enhanceRenderedContent(bubble, { highlightCode = true } = {}) {
+  wrapMarkdownTables(bubble);
+  enhanceRenderedMedia(bubble);
+  enhanceRenderedLinks(bubble);
+  if (highlightCode) enhanceCodeBlocks(bubble);
+}
+
+function wrapMarkdownTables(bubble) {
+  bubble.querySelectorAll("table").forEach((table) => {
+    if (table.parentElement?.classList.contains("markdown-table-scroll")) return;
+    const wrapper = document.createElement("div");
+    wrapper.className = "markdown-table-scroll";
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute("role", "region");
+    wrapper.setAttribute("aria-label", "Scrollable table");
+    table.before(wrapper);
+    wrapper.appendChild(table);
+  });
+}
+
+function enhanceRenderedMedia(bubble) {
+  bubble.querySelectorAll("img").forEach((img) => {
+    img.loading = "lazy";
+    img.decoding = "async";
+  });
+  bubble.querySelectorAll("video").forEach((video) => {
+    if (!video.hasAttribute("controls")) video.setAttribute("controls", "");
+  });
+}
+
+function enhanceRenderedLinks(bubble) {
+  bubble.querySelectorAll("a[href]").forEach((link) => {
+    link.target = "_blank";
+    link.rel = "noreferrer";
+  });
+}
+
+// Syntax-highlight code and inject a copy button into each <pre>.
 function enhanceCodeBlocks(bubble) {
   bubble.querySelectorAll("pre code").forEach((code) => {
     try {
@@ -1089,7 +1127,7 @@ function appendMessage(role, content = "", { id, index, skipActions, isLast, rou
   bubble.className = "bubble";
   if (role === "assistant" && content) {
     bubble.innerHTML = renderMarkdown(content);
-    enhanceCodeBlocks(bubble);
+    enhanceRenderedContent(bubble);
   } else {
     bubble.textContent = content;
   }
@@ -1360,6 +1398,7 @@ async function runChatStream({ regenerate }) {
       }
       assistantContent += decoder.decode(value, { stream: true });
       bubble.innerHTML = renderMarkdown(assistantContent);
+      enhanceRenderedContent(bubble, { highlightCode: false });
       bubble.appendChild(cursor);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
@@ -1367,6 +1406,7 @@ async function runChatStream({ regenerate }) {
     if (tail) {
       assistantContent += tail;
       bubble.innerHTML = renderMarkdown(assistantContent);
+      enhanceRenderedContent(bubble, { highlightCode: false });
     }
   } catch (err) {
     if (err.name === "AbortError") {
@@ -1378,7 +1418,7 @@ async function runChatStream({ regenerate }) {
     if (statusEl) statusEl.remove();
     cursor.remove();
     if (assistantContent) {
-      enhanceCodeBlocks(bubble);
+      enhanceRenderedContent(bubble);
       messages.push({ role: "assistant", content: assistantContent, ...(assistantRoute || {}) });
     } else if (aborted) {
       bubble.textContent = "[stopped]";
