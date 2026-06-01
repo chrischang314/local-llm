@@ -53,6 +53,10 @@ and a compact worker summary derived from the router's backend health cache.
 The frontend sidebar uses that same response to show `available/enabled`
 workers and active routed requests. Worker readiness warning/error severity
 changes the compact sidebar indicator even when Ollama itself is still up.
+The health summary also overlays Kubernetes optional-worker switch state when it
+is available. A PC worker whose switch Deployment is scaled to `0` is counted in
+the total inventory but treated as intentionally disabled, so turning a PC off
+for gaming or maintenance does not create a false degraded-capacity warning.
 
 The authenticated `/workers` route is the operational view. It combines router
 health with Kubernetes switch annotations and returns a readiness summary. That

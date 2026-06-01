@@ -246,7 +246,10 @@ async def health():
     try:
         models = await ollama_router.list_models()
         model_count = len(models.get("models", []))
-        workers = _health_worker_summary(models)
+        workers = _health_worker_summary(
+            models,
+            switch_by_worker=await _safe_worker_switch_lookup(),
+        )
         if model_count:
             ollama_status = "ok"
     except Exception:
@@ -259,28 +262,77 @@ async def health():
     }
 
 
-def _health_worker_summary(models_payload: dict) -> dict:
+async def _safe_worker_switch_lookup() -> dict[str, dict]:
+    """Best-effort worker switch state for public health summaries."""
+    try:
+        switches = await asyncio.wait_for(_list_worker_switches(), timeout=1.0)
+        return {
+            switch["worker"]: switch
+            for switch in (
+                _serialize_worker_switch(item)
+                for item in switches
+            )
+        }
+    except (RuntimeError, asyncio.TimeoutError, httpx.HTTPError):
+        return {}
+
+
+def _health_worker_summary(
+    models_payload: dict,
+    *,
+    switch_by_worker: dict[str, dict] | None = None,
+) -> dict:
     """Build a compact worker summary from the router's public backend status."""
     backends = models_payload.get("backends", []) or []
-    enabled = [backend for backend in backends if backend.get("enabled")]
-    available = [backend for backend in enabled if backend.get("available")]
-    busy = sum(int(backend.get("in_flight") or 0) for backend in backends)
-    loaded_model_count = sum(
-        len(backend.get("loaded_models") or [])
-        for backend in backends
-    )
+    workers = _merge_worker_switch_state(backends, switch_by_worker or {})
+    enabled = [worker for worker in workers if worker.get("enabled")]
+    available = [worker for worker in enabled if worker.get("available")]
+    busy = sum(int(worker.get("in_flight") or 0) for worker in workers)
+    loaded_model_count = sum(_worker_loaded_model_count(worker) for worker in workers)
     return {
-        "total": len(backends),
+        "total": len(workers),
         "enabled": len(enabled),
         "available": len(available),
         "unavailable": len(enabled) - len(available),
         "busy": busy,
         "loaded_model_count": loaded_model_count,
         "readiness": _worker_readiness_summary(
-            backends,
+            workers,
             include_issues=False,
         ),
     }
+
+
+def _merge_worker_switch_state(
+    backends: list[dict],
+    switch_by_worker: dict[str, dict],
+) -> list[dict]:
+    """Overlay Kubernetes worker switches onto router backend status."""
+    backend_by_name = {backend["name"]: backend for backend in backends}
+    ordered_names = list(
+        dict.fromkeys([*switch_by_worker.keys(), *backend_by_name.keys()])
+    )
+    workers = []
+    for name in ordered_names:
+        backend = backend_by_name.get(name, {})
+        switch = switch_by_worker.get(name)
+        enabled = (
+            switch["desired_replicas"] > 0
+            if switch
+            else bool(backend.get("enabled", False))
+        )
+        workers.append({
+            **backend,
+            "name": name,
+            "available": bool(backend.get("available", False)),
+            "enabled": enabled,
+            "essential": bool(backend.get("essential", False)),
+            "loaded_models": backend.get("loaded_models", []),
+            "in_flight": backend.get("in_flight", 0),
+            "runtime_error": backend.get("runtime_error"),
+            "control": switch,
+        })
+    return workers
 
 
 def _parse_observed_at(value: str | None) -> datetime | None:
@@ -312,6 +364,9 @@ def _worker_sync_pending(worker: dict) -> bool:
 def _worker_sync_stale(worker: dict, now: datetime | None = None) -> bool:
     control = worker.get("control") or {}
     if not control:
+        return False
+    desired = (control.get("desired_state") or "").lower()
+    if desired and desired != "on":
         return False
     observed_at = _parse_observed_at(control.get("last_observed_at"))
     if not observed_at:

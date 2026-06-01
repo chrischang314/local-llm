@@ -7,7 +7,9 @@
 - `/health` now includes a `workers` summary with total, enabled, available,
   unavailable, busy, loaded model counts, a compact readiness state, and a
   public-safe readiness issue count. The frontend sidebar renders this as model
-  count plus worker readiness severity and summary.
+  count plus worker readiness severity and summary. It overlays Kubernetes
+  optional-worker switches, so CHRIS-PC-1/CHRIS-PC-2 scaled to `0` count as
+  intentionally disabled rather than degraded capacity.
 - The authenticated `/workers` response now includes a readiness summary with
   actionable issue rows for unavailable enabled workers, switch sync mismatches,
   stale controller heartbeats, and worker-control access failures. Settings >

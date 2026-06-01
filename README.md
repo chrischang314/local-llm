@@ -79,6 +79,11 @@ model count and the worker readiness severity/summary. If Ollama is up but
 enabled worker capacity is degraded, the sidebar switches to a warning state
 instead of looking fully healthy.
 
+When an optional Windows worker switch is scaled to `0`, `/health` treats that
+worker as intentionally disabled. Disabled optional workers are still counted in
+the total worker inventory, but they do not make capacity look degraded unless
+their switch is turned on and Ollama remains unreachable.
+
 The authenticated `GET /workers` endpoint also returns a `readiness` object with
 issue details and suggested next checks for switch sync mismatches, stale worker
 controller heartbeats, unreachable enabled workers, and worker-control access

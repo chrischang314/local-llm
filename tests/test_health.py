@@ -66,6 +66,84 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["workers"]["readiness"]["issue_count"], 1)
         self.assertEqual(payload["workers"]["readiness"]["issues"], [])
 
+    async def test_health_respects_optional_worker_switches(self):
+        async def fake_list_models():
+            return {
+                "models": [{"name": "llama3.2:3b"}],
+                "backends": [
+                    {
+                        "name": "mac-mini",
+                        "enabled": True,
+                        "available": True,
+                        "loaded_models": [{"name": "llama3.2:3b"}],
+                    },
+                    {
+                        "name": "chris-pc-1",
+                        "enabled": True,
+                        "available": False,
+                        "loaded_models": [],
+                    },
+                    {
+                        "name": "chris-pc-2",
+                        "enabled": True,
+                        "available": False,
+                        "loaded_models": [],
+                    },
+                ],
+            }
+
+        async def fake_switches():
+            return [
+                {
+                    "metadata": {
+                        "name": "chris-pc-1-ollama-switch",
+                        "namespace": "local-llm",
+                        "labels": {"local-llm.io/worker": "chris-pc-1"},
+                        "annotations": {
+                            "local-llm.io/desired-state": "off",
+                            "local-llm.io/actual-state": "off",
+                        },
+                    },
+                    "spec": {"replicas": 0},
+                    "status": {"readyReplicas": 0},
+                },
+                {
+                    "metadata": {
+                        "name": "chris-pc-2-ollama-switch",
+                        "namespace": "local-llm",
+                        "labels": {"local-llm.io/worker": "chris-pc-2"},
+                        "annotations": {
+                            "local-llm.io/desired-state": "off",
+                            "local-llm.io/actual-state": "off",
+                        },
+                    },
+                    "spec": {"replicas": 0},
+                    "status": {"readyReplicas": 0},
+                },
+            ]
+
+        original_models = main.ollama_router.list_models
+        original_switches = main._list_worker_switches
+        main.ollama_router.list_models = fake_list_models
+        main._list_worker_switches = fake_switches
+        try:
+            payload = await main.health()
+        finally:
+            main.ollama_router.list_models = original_models
+            main._list_worker_switches = original_switches
+
+        self.assertEqual(payload["workers"]["total"], 3)
+        self.assertEqual(payload["workers"]["enabled"], 1)
+        self.assertEqual(payload["workers"]["available"], 1)
+        self.assertEqual(payload["workers"]["unavailable"], 0)
+        self.assertEqual(payload["workers"]["readiness"]["state"], "ready")
+        self.assertEqual(payload["workers"]["readiness"]["severity"], "ok")
+        self.assertEqual(
+            payload["workers"]["readiness"]["summary"],
+            "1/1 enabled worker available; 1 resident model",
+        )
+        self.assertEqual(payload["workers"]["readiness"]["issue_count"], 0)
+
     async def test_health_returns_empty_worker_summary_when_router_fails(self):
         async def failing_list_models():
             raise RuntimeError("router unavailable")
