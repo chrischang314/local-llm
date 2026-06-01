@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Local LLM</title>
-  <link rel="stylesheet" href="style.css?v=20260521-code-jobs" />
-  <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/github-dark.min.css" />
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link rel="stylesheet" href="style.css?v=20260601-mobile-rendering" />
+  <script src="vendor/marked/4.3.0/marked.min.js"></script>
+  <script src="vendor/dompurify/3.4.7/purify.min.js"></script>
+  <link rel="stylesheet" href="vendor/highlight.js/11.10.0/styles/github-dark.min.css" />
+  <script src="vendor/highlight.js/11.10.0/highlight.min.js"></script>
+  <script src="vendor/lucide/0.468.0/lucide.min.js"></script>
 </head>
 <body>
   <div id="login-screen" class="auth-view">
@@ -60,18 +60,6 @@
         <i data-lucide="plus" aria-hidden="true"></i>
         <span>New chat</span>
       </button>
-
-      <div class="workspace-switch" role="tablist" aria-label="Workspace">
-        <button id="chat-workspace-btn" class="workspace-tab active" type="button" role="tab" aria-selected="true">
-          <i data-lucide="message-square-text" aria-hidden="true"></i>
-          <span>Chat</span>
-        </button>
-        <button id="code-workspace-btn" class="workspace-tab" type="button" role="tab" aria-selected="false">
-          <i data-lucide="square-terminal" aria-hidden="true"></i>
-          <span>Code Jobs</span>
-        </button>
-      </div>
-
       <button id="settings-btn" class="secondary-action" type="button">
         <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
         <span>Settings</span>
@@ -98,7 +86,7 @@
       </div>
     </aside>
 
-    <section class="main" aria-label="Chat workspace">
+    <section id="chat-workspace" class="main" aria-label="Chat workspace">
       <header class="topbar">
         <div>
           <p class="eyebrow">Workspace</p>
@@ -106,11 +94,21 @@
         </div>
 
         <div class="header-controls">
-          <button id="research-toggle" class="research-toggle" type="button" aria-pressed="false" title="Use web research">
-            <i data-lucide="globe-2" aria-hidden="true"></i>
-            <span>Research</span>
-          </button>
+          <div class="workspace-mode-switch" aria-label="Workspace mode">
+            <button class="mode-btn active" type="button" data-workspace-mode="chat">
+              <i data-lucide="message-square" aria-hidden="true"></i>
+              <span>Chat</span>
+            </button>
+            <button class="mode-btn" type="button" data-workspace-mode="code">
+              <i data-lucide="square-terminal" aria-hidden="true"></i>
+              <span>Code</span>
+            </button>
+          </div>
           <span id="token-counter" class="token-counter hidden" title="Estimated context size"></span>
+          <button id="export-conversation-btn" class="inline-action" type="button" title="Export active conversation" disabled>
+            <i data-lucide="download" aria-hidden="true"></i>
+            <span>Export</span>
+          </button>
           <div class="model-panel">
             <label for="model-select">Model</label>
             <select id="model-select">
@@ -125,6 +123,10 @@
       <footer class="composer-wrap">
         <div class="composer">
           <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
+          <button id="research-toggle" class="inline-action research-toggle" type="button" aria-pressed="false" title="Use web research" disabled>
+            <i data-lucide="search" aria-hidden="true"></i>
+            <span>Research</span>
+          </button>
           <button id="send-btn" class="send-btn" type="button">
             <i data-lucide="send-horizontal" aria-hidden="true"></i>
             <span>Send</span>
@@ -137,160 +139,114 @@
       </footer>
     </section>
 
-    <section id="code-workspace" class="workspace-main hidden" aria-label="Code jobs workspace">
-      <header class="workspace-header">
+    <section id="code-jobs-view" class="main code-jobs-view hidden" aria-label="Code jobs workspace">
+      <header class="topbar">
         <div>
           <p class="eyebrow">Workspace</p>
-          <h1>Code Jobs</h1>
+          <h1>Code change</h1>
         </div>
 
-        <div class="workspace-actions">
-          <button id="github-refresh-btn" class="icon-action" type="button" title="Refresh GitHub">
+        <div class="header-controls">
+          <div class="workspace-mode-switch" aria-label="Workspace mode">
+            <button class="mode-btn" type="button" data-workspace-mode="chat">
+              <i data-lucide="message-square" aria-hidden="true"></i>
+              <span>Chat</span>
+            </button>
+            <button class="mode-btn active" type="button" data-workspace-mode="code">
+              <i data-lucide="square-terminal" aria-hidden="true"></i>
+              <span>Code</span>
+            </button>
+          </div>
+          <span id="agent-status-pill" class="token-counter">checking...</span>
+          <button id="refresh-code-jobs-btn" class="inline-action" type="button">
             <i data-lucide="refresh-cw" aria-hidden="true"></i>
-            <span>GitHub</span>
-          </button>
-          <button id="jobs-refresh-btn" class="icon-action" type="button" title="Refresh jobs">
-            <i data-lucide="list-restart" aria-hidden="true"></i>
-            <span>Jobs</span>
+            <span>Refresh</span>
           </button>
         </div>
       </header>
 
-      <main class="code-workspace-body">
-        <section class="workspace-panel github-panel" aria-labelledby="github-panel-title">
-          <div class="panel-heading">
-            <span class="panel-icon"><i data-lucide="github" aria-hidden="true"></i></span>
+      <main class="code-jobs-layout">
+        <section class="code-panel">
+          <div class="panel-header">
             <div>
-              <p class="eyebrow">Integration</p>
-              <h2 id="github-panel-title">GitHub</h2>
+              <h2>Prompt a repository change</h2>
+              <p id="github-status-text" class="hint">Checking connection...</p>
             </div>
-            <span id="github-status-pill" class="status-pill" data-tone="warning">checking</span>
-          </div>
-
-          <p id="github-summary" class="panel-copy">Sign in with GitHub to browse repositories and launch code jobs.</p>
-
-          <div class="github-actions">
-            <button id="github-connect-btn" class="github-connect-btn" type="button" disabled>
+            <button id="github-connect-btn" class="inline-action" type="button">
               <i data-lucide="github" aria-hidden="true"></i>
               <span>Sign in with GitHub</span>
             </button>
-            <button id="github-disconnect-btn" class="secondary-mini hidden" type="button">Disconnect</button>
-          </div>
-
-          <div id="github-oauth-setup" class="github-oauth-setup hidden">
-            <p class="panel-copy">
-              One-time service setup: create a GitHub OAuth App with this callback URL, then save its client ID and secret here.
-            </p>
-            <label for="github-oauth-callback-url">Callback URL
-              <input id="github-oauth-callback-url" type="text" readonly value="Loading callback URL..." />
-            </label>
-            <label for="github-oauth-client-id">OAuth Client ID
-              <input id="github-oauth-client-id" type="text" autocomplete="off" placeholder="GitHub OAuth Client ID" />
-            </label>
-            <label for="github-oauth-client-secret">OAuth Client Secret
-              <input id="github-oauth-client-secret" type="password" autocomplete="off" placeholder="GitHub OAuth Client Secret" />
-            </label>
-            <button id="github-oauth-save-btn" class="secondary-action compact" type="button">
-              <i data-lucide="save" aria-hidden="true"></i>
-              <span>Save GitHub OAuth App</span>
-            </button>
-            <p id="github-oauth-config-status" class="form-status" aria-live="polite"></p>
-          </div>
-
-          <label for="github-repo-select">Repository</label>
-          <select id="github-repo-select">
-            <option value="">Load repositories</option>
-          </select>
-        </section>
-
-        <section class="workspace-panel new-job-panel" aria-labelledby="new-job-title">
-          <div class="panel-heading">
-            <span class="panel-icon"><i data-lucide="play-square" aria-hidden="true"></i></span>
-            <div>
-              <p class="eyebrow">Launch</p>
-              <h2 id="new-job-title">New Code Job</h2>
-            </div>
           </div>
 
           <form id="code-job-form" class="code-job-form">
-            <label for="job-title-input">Title</label>
-            <input id="job-title-input" type="text" placeholder="Short task name" autocomplete="off" required />
+            <label>Repository search
+              <div class="repo-search-row">
+                <input id="repo-search-input" type="search" placeholder="owner/repo" autocomplete="off" />
+                <button id="repo-search-btn" class="inline-action" type="button">
+                  <i data-lucide="search" aria-hidden="true"></i>
+                  <span>Search</span>
+                </button>
+              </div>
+            </label>
 
-            <label for="job-repo-select">Repository</label>
-            <select id="job-repo-select">
-              <option value="">Select from GitHub or enter below</option>
-            </select>
-
-            <label for="job-repo-url-input">Repository URL or slug</label>
-            <input id="job-repo-url-input" type="text" placeholder="owner/repo or https://github.com/owner/repo" autocomplete="off" />
-
-            <div class="job-form-grid">
-              <label for="job-base-branch-input">Base branch
-                <input id="job-base-branch-input" type="text" value="main" autocomplete="off" />
+            <div class="job-field-grid">
+              <label>Repository
+                <select id="repo-select">
+                  <option value="">Connect GitHub first</option>
+                </select>
               </label>
-              <label for="job-work-branch-input">Work branch
-                <input id="job-work-branch-input" type="text" placeholder="codex/task-name" autocomplete="off" />
+              <label>Branch
+                <select id="branch-select">
+                  <option value="">Select a repo</option>
+                </select>
               </label>
-              <label for="job-mode-select">Mode
-                <select id="job-mode-select">
-                  <option value="implement">Implement</option>
-                  <option value="fix">Fix</option>
-                  <option value="review">Review</option>
-                  <option value="docs">Docs</option>
+              <label>Model
+                <select id="agent-model-select">
+                  <option value="">Loading models...</option>
                 </select>
               </label>
             </div>
 
-            <label for="job-prompt-input">Instructions</label>
-            <textarea id="job-prompt-input" rows="5" placeholder="Describe the code change, constraints, and verification expected." required></textarea>
+            <label>Task
+              <textarea id="agent-task-input" rows="6" placeholder="Tell the agent what code change to make, what tests to run, and what finished should look like."></textarea>
+            </label>
 
-            <div class="job-options" aria-label="Job options">
-              <label>
-                <input id="job-dispatch" type="checkbox" checked />
-                <span>Dispatch GitHub</span>
-              </label>
-              <label>
-                <input id="job-run-tests" type="checkbox" checked />
-                <span>Run tests</span>
-              </label>
-              <label>
-                <input id="job-open-pr" type="checkbox" checked />
-                <span>Open PR</span>
-              </label>
+            <label>Test command
+              <input id="agent-test-command-input" type="text" placeholder="e.g. python -m unittest discover -s tests" />
+            </label>
+
+            <div class="form-actions">
+              <button id="run-code-job-btn" class="login-submit" type="submit">
+                <i data-lucide="play" aria-hidden="true"></i>
+                <span>Run code change</span>
+              </button>
+              <span id="code-job-form-status" class="hint"></span>
             </div>
-
-            <button id="job-submit-btn" class="primary-action" type="submit">
-              <i data-lucide="send-horizontal" aria-hidden="true"></i>
-              <span>Start job</span>
-            </button>
-            <p id="job-form-status" class="form-status hidden" aria-live="polite"></p>
           </form>
         </section>
 
-        <section class="workspace-panel jobs-panel" aria-labelledby="jobs-panel-title">
-          <div class="panel-heading">
-            <span class="panel-icon"><i data-lucide="list-checks" aria-hidden="true"></i></span>
-            <div>
-              <p class="eyebrow">Queue</p>
-              <h2 id="jobs-panel-title">Jobs</h2>
-            </div>
-            <span id="jobs-count-pill" class="status-pill">0 jobs</span>
+        <section class="code-panel job-list-panel">
+          <div class="panel-header">
+            <h2>Jobs</h2>
           </div>
-
-          <div id="jobs-list" class="jobs-list">No jobs loaded.</div>
+          <div id="agent-job-list" class="agent-job-list">No jobs yet.</div>
         </section>
 
-        <aside class="workspace-panel job-detail-panel" aria-labelledby="job-detail-title">
-          <div class="panel-heading">
-            <span class="panel-icon"><i data-lucide="clipboard-list" aria-hidden="true"></i></span>
+        <section class="code-panel job-detail-panel">
+          <div class="panel-header">
             <div>
-              <p class="eyebrow">Selected</p>
-              <h2 id="job-detail-title">Job Detail</h2>
+              <h2 id="agent-job-title">Job details</h2>
+              <p id="agent-job-summary" class="hint">Select a job to inspect logs and changes.</p>
             </div>
+            <button id="cancel-code-job-btn" class="inline-action danger-action hidden" type="button">
+              <i data-lucide="ban" aria-hidden="true"></i>
+              <span>Cancel</span>
+            </button>
           </div>
-
-          <div id="job-detail" class="job-detail">Select a job to inspect status, logs, and links.</div>
-        </aside>
+          <div id="agent-job-timeline" class="job-timeline"></div>
+          <pre id="agent-job-logs" class="job-log">Waiting for a job...</pre>
+          <pre id="agent-job-diff" class="job-diff">No diff loaded.</pre>
+        </section>
       </main>
     </section>
   </div>
@@ -348,7 +304,37 @@
           <h3>Workers</h3>
           <p class="hint">Optional inference workers and routing status.</p>
 
+          <div id="worker-readiness-panel" class="worker-readiness-panel">Checking worker readiness...</div>
           <div id="worker-list" class="worker-list">Loading...</div>
+        </section>
+
+        <section>
+          <h3>Integrations</h3>
+          <p id="settings-github-status" class="hint">GitHub status unknown.</p>
+          <button id="settings-github-connect" class="inline-action" type="button">
+            <i data-lucide="github" aria-hidden="true"></i>
+            <span>Sign in with GitHub</span>
+          </button>
+          <details id="github-oauth-setup" class="github-oauth-setup settings-oauth-setup">
+            <summary>GitHub service setup</summary>
+            <p class="hint">Admin-only setup for the shared OAuth app. Each Local LLM user still receives and keeps their own GitHub authorization after sign-in.</p>
+            <label>Callback URL
+              <input id="github-oauth-callback-url" type="text" readonly value="Loading callback URL..." />
+            </label>
+            <div class="row oauth-field-grid">
+              <label>OAuth Client ID
+                <input id="github-oauth-client-id" type="text" autocomplete="off" placeholder="GitHub OAuth Client ID" />
+              </label>
+              <label>OAuth Client Secret
+                <input id="github-oauth-client-secret" type="password" autocomplete="off" placeholder="GitHub OAuth Client Secret" />
+              </label>
+            </div>
+            <button id="github-oauth-save-btn" class="inline-action" type="button">
+              <i data-lucide="save" aria-hidden="true"></i>
+              <span>Save service setup</span>
+            </button>
+            <p id="github-oauth-config-status" class="hint">Normal users should use only Sign in with GitHub.</p>
+          </details>
         </section>
       </div>
     </div>
@@ -359,6 +345,7 @@
       lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
     }
   </script>
-  <script src="app.js?v=20260521-service-github-oauth"></script>
+  <script src="health-status.js?v=20260528-worker-readiness"></script>
+  <script src="app.js?v=20260601-mobile-rendering"></script>
 </body>
 </html>

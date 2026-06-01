@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import pathlib
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -38,7 +39,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,8 +52,8 @@ from auth import (
     hash_password,
     verify_password,
 )
-from agent_job_routes import router as agent_job_router
 from database import AsyncSessionLocal, Base, engine, get_db, migrate_schema
+from agent_routes import router as agent_router
 from github_routes import router as github_router
 from models import Conversation
 from models import Message as DBMessage
@@ -66,6 +67,7 @@ K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 K8S_NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 WORKER_SWITCH_LABEL = "app.kubernetes.io/component=external-worker-switch"
+WORKER_SYNC_STALE_SECONDS = int(os.getenv("WORKER_SYNC_STALE_SECONDS", "300"))
 
 
 @asynccontextmanager
@@ -89,13 +91,15 @@ app.add_middleware(
         "X-Conversation-Id",
         "X-LLM-Backend",
         "X-LLM-Model-Status",
+        "X-LLM-Model-Loaded",
+        "X-LLM-Model-Expires-At",
         "X-Research-Status",
         "X-Research-Source-Count",
     ],
 )
 
-app.include_router(agent_job_router)
 app.include_router(github_router)
+app.include_router(agent_router)
 
 
 # ---------------------------------------------------------------------------
@@ -288,13 +292,18 @@ async def health():
         "total": 0,
         "enabled": 0,
         "available": 0,
+        "unavailable": 0,
         "busy": 0,
         "loaded_model_count": 0,
+        "readiness": _worker_readiness_summary([], include_issues=False),
     }
     try:
         models = await ollama_router.list_models()
         model_count = len(models.get("models", []))
-        workers = _health_worker_summary(models)
+        workers = _health_worker_summary(
+            models,
+            switch_by_worker=await _safe_worker_switch_lookup(),
+        )
         if model_count:
             ollama_status = "ok"
     except Exception:
@@ -307,29 +316,252 @@ async def health():
     }
 
 
-def _health_worker_summary(models_payload: dict) -> dict:
-    """Build a compact worker summary from the router's public backend status."""
-    backends = models_payload.get("backends", []) or []
-    enabled = [backend for backend in backends if backend.get("enabled")]
-    available = [backend for backend in enabled if backend.get("available")]
-    busy = sum(int(backend.get("in_flight") or 0) for backend in backends)
-    loaded_model_count = sum(
-        len(backend.get("loaded_models") or [])
-        for backend in backends
-    )
-    return {
-        "total": len(backends),
-        "enabled": len(enabled),
-        "available": len(available),
-        "busy": busy,
-        "loaded_model_count": loaded_model_count,
-    }
-
-
 @app.get("/research/status")
 async def get_research_status(_: dict = Depends(current_user)):
     """Return non-secret web research configuration for the signed-in UI."""
     return research_status()
+
+
+async def _safe_worker_switch_lookup() -> dict[str, dict]:
+    """Best-effort worker switch state for public health summaries."""
+    try:
+        switches = await asyncio.wait_for(_list_worker_switches(), timeout=1.0)
+        return {
+            switch["worker"]: switch
+            for switch in (
+                _serialize_worker_switch(item)
+                for item in switches
+            )
+        }
+    except (RuntimeError, asyncio.TimeoutError, httpx.HTTPError):
+        return {}
+
+
+def _health_worker_summary(
+    models_payload: dict,
+    *,
+    switch_by_worker: dict[str, dict] | None = None,
+) -> dict:
+    """Build a compact worker summary from the router's public backend status."""
+    backends = models_payload.get("backends", []) or []
+    workers = _merge_worker_switch_state(backends, switch_by_worker or {})
+    enabled = [worker for worker in workers if worker.get("enabled")]
+    available = [worker for worker in enabled if worker.get("available")]
+    busy = sum(int(worker.get("in_flight") or 0) for worker in workers)
+    loaded_model_count = sum(_worker_loaded_model_count(worker) for worker in workers)
+    return {
+        "total": len(workers),
+        "enabled": len(enabled),
+        "available": len(available),
+        "unavailable": len(enabled) - len(available),
+        "busy": busy,
+        "loaded_model_count": loaded_model_count,
+        "readiness": _worker_readiness_summary(
+            workers,
+            include_issues=False,
+        ),
+    }
+
+
+def _merge_worker_switch_state(
+    backends: list[dict],
+    switch_by_worker: dict[str, dict],
+) -> list[dict]:
+    """Overlay Kubernetes worker switches onto router backend status."""
+    backend_by_name = {backend["name"]: backend for backend in backends}
+    ordered_names = list(
+        dict.fromkeys([*switch_by_worker.keys(), *backend_by_name.keys()])
+    )
+    workers = []
+    for name in ordered_names:
+        backend = backend_by_name.get(name, {})
+        switch = switch_by_worker.get(name)
+        enabled = (
+            switch["desired_replicas"] > 0
+            if switch
+            else bool(backend.get("enabled", False))
+        )
+        workers.append({
+            **backend,
+            "name": name,
+            "available": bool(backend.get("available", False)),
+            "enabled": enabled,
+            "essential": bool(backend.get("essential", False)),
+            "loaded_models": backend.get("loaded_models", []),
+            "in_flight": backend.get("in_flight", 0),
+            "runtime_error": backend.get("runtime_error"),
+            "control": switch,
+        })
+    return workers
+
+
+def _parse_observed_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        observed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if observed.tzinfo is None:
+        return observed.replace(tzinfo=timezone.utc)
+    return observed.astimezone(timezone.utc)
+
+
+def _worker_loaded_model_count(worker: dict) -> int:
+    return len(worker.get("loaded_models") or [])
+
+
+def _worker_sync_pending(worker: dict) -> bool:
+    control = worker.get("control") or {}
+    desired = (control.get("desired_state") or "").lower()
+    actual = (control.get("actual_state") or "").lower()
+    return bool(desired and actual and actual != "unknown" and desired != actual)
+
+
+def _worker_sync_stale(worker: dict, now: datetime | None = None) -> bool:
+    control = worker.get("control") or {}
+    if not control:
+        return False
+    desired = (control.get("desired_state") or "").lower()
+    if desired and desired != "on":
+        return False
+    observed_at = _parse_observed_at(control.get("last_observed_at"))
+    if not observed_at:
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - observed_at).total_seconds() > WORKER_SYNC_STALE_SECONDS
+
+
+def _worker_readiness_summary(
+    workers: list[dict],
+    *,
+    control_available: bool = True,
+    control_error: str | None = None,
+    include_issues: bool = True,
+    now: datetime | None = None,
+) -> dict:
+    """Summarize model worker readiness without changing routing behavior."""
+    enabled = [worker for worker in workers if worker.get("enabled")]
+    available = [worker for worker in enabled if worker.get("available")]
+    unavailable = [worker for worker in enabled if not worker.get("available")]
+    pending_sync = [worker for worker in workers if _worker_sync_pending(worker)]
+    stale_sync = [worker for worker in workers if _worker_sync_stale(worker, now=now)]
+    busy = sum(int(worker.get("in_flight") or 0) for worker in workers)
+    loaded_model_count = sum(_worker_loaded_model_count(worker) for worker in workers)
+
+    if not workers:
+        state = "no_workers"
+        severity = "warning"
+    elif not enabled:
+        state = "disabled"
+        severity = "warning"
+    elif not available:
+        state = "offline"
+        severity = "error"
+    elif unavailable or pending_sync or stale_sync or not control_available:
+        state = "degraded"
+        severity = "warning"
+    else:
+        state = "ready"
+        severity = "ok"
+
+    if not workers:
+        parts = ["No workers configured"]
+    elif not enabled:
+        parts = ["No workers enabled"]
+    else:
+        worker_word = "worker" if len(enabled) == 1 else "workers"
+        parts = [f"{len(available)}/{len(enabled)} enabled {worker_word} available"]
+    if busy:
+        parts.append(f"{busy} active requests")
+    if loaded_model_count:
+        model_word = "model" if loaded_model_count == 1 else "models"
+        parts.append(f"{loaded_model_count} resident {model_word}")
+    if pending_sync:
+        parts.append(f"{len(pending_sync)} switch sync pending")
+    if stale_sync:
+        parts.append(f"{len(stale_sync)} stale controller heartbeat")
+    if control_error:
+        parts.append("worker control unavailable")
+
+    public_issue_count = (
+        len(pending_sync)
+        + len(stale_sync)
+        + len(unavailable)
+        + sum(
+            1
+            for worker in workers
+            if worker.get("available") and worker.get("runtime_error")
+        )
+        + (1 if control_error else 0)
+    )
+
+    issues = []
+    if include_issues and control_error:
+        issues.append({
+            "type": "control_unavailable",
+            "severity": "warning",
+            "message": f"Worker switch control is unavailable: {control_error}",
+            "next_check": "Check the backend Kubernetes service-account token and worker switch RBAC.",
+        })
+    if include_issues:
+        for worker in pending_sync:
+            control = worker.get("control") or {}
+            issues.append({
+                "type": "sync_pending",
+                "severity": "warning",
+                "worker": worker.get("name"),
+                "message": (
+                    f"{worker.get('name')} switch wants {control.get('desired_state')} "
+                    f"but the controller reports {control.get('actual_state')}."
+                ),
+                "next_check": "Run the worker controller once or inspect its scheduled task logs.",
+            })
+        for worker in stale_sync:
+            issues.append({
+                "type": "sync_stale",
+                "severity": "warning",
+                "worker": worker.get("name"),
+                "message": f"{worker.get('name')} controller heartbeat is stale.",
+                "next_check": "Check whether the worker controller scheduled task is still running.",
+            })
+        for worker in unavailable:
+            issues.append({
+                "type": "worker_unavailable",
+                "severity": "error" if not available else "warning",
+                "worker": worker.get("name"),
+                "message": f"{worker.get('name')} is enabled but Ollama is not reachable.",
+                "next_check": "Check the worker runtime, firewall, and Ollama /api/tags endpoint.",
+            })
+        for worker in workers:
+            if worker.get("available") and worker.get("runtime_error"):
+                issues.append({
+                    "type": "runtime_status_unavailable",
+                    "severity": "warning",
+                    "worker": worker.get("name"),
+                    "message": f"{worker.get('name')} is reachable but resident model status failed.",
+                    "next_check": "Check the worker's Ollama /api/ps endpoint.",
+                })
+
+    return {
+        "state": state,
+        "severity": severity,
+        "summary": "; ".join(parts),
+        "total": len(workers),
+        "enabled": len(enabled),
+        "available": len(available),
+        "unavailable": len(unavailable),
+        "busy": busy,
+        "loaded_model_count": loaded_model_count,
+        "pending_sync": len(pending_sync),
+        "stale_sync": len(stale_sync),
+        "control_available": control_available,
+        "issue_count": public_issue_count,
+        "issues": issues,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +579,17 @@ def _serialize_conversation(c: Conversation) -> dict:
         "top_p": c.top_p if c.top_p is not None else 0.9,
         "top_k": c.top_k if c.top_k is not None else 40,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+    }
+
+
+def _serialize_message(m: DBMessage) -> dict:
+    return {
+        "id": m.id,
+        "role": m.role,
+        "content": m.content,
+        "model": m.model,
+        "backend_name": m.backend_name,
+        "model_status": m.model_status,
     }
 
 
@@ -441,7 +684,101 @@ async def get_messages(
     conv = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return [{"id": m.id, "role": m.role, "content": m.content} for m in conv.messages]
+    return [_serialize_message(m) for m in conv.messages]
+
+
+@app.get("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: int,
+    format: str = "markdown",
+    user_id: int = Depends(current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+        .options(selectinload(Conversation.messages))
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    export_format = format.strip().lower()
+    payload = _conversation_export_payload(conv)
+    if export_format == "json":
+        filename = _conversation_export_filename(conv, "json")
+        return JSONResponse(
+            payload,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    if export_format in {"markdown", "md"}:
+        filename = _conversation_export_filename(conv, "md")
+        return Response(
+            _conversation_export_markdown(payload),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    raise HTTPException(status_code=400, detail="Unsupported export format")
+
+
+def _conversation_export_payload(conv: Conversation) -> dict:
+    return {
+        "id": conv.id,
+        "title": conv.title or "New Chat",
+        "model": conv.model,
+        "system_prompt": conv.system_prompt or "",
+        "settings": {
+            "temperature": conv.temperature if conv.temperature is not None else 0.7,
+            "top_p": conv.top_p if conv.top_p is not None else 0.9,
+            "top_k": conv.top_k if conv.top_k is not None else 40,
+        },
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+        "messages": [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at.isoformat() if message.created_at else None,
+            }
+            for message in conv.messages
+        ],
+    }
+
+
+def _conversation_export_markdown(payload: dict) -> str:
+    lines = [
+        f"# {payload['title']}",
+        "",
+        f"- Conversation ID: {payload['id']}",
+        f"- Model: {payload['model'] or 'unspecified'}",
+        f"- Created: {payload['created_at'] or 'unknown'}",
+        f"- Updated: {payload['updated_at'] or 'unknown'}",
+        (
+            "- Settings: "
+            f"temperature {payload['settings']['temperature']}, "
+            f"top_p {payload['settings']['top_p']}, "
+            f"top_k {payload['settings']['top_k']}"
+        ),
+        "",
+    ]
+    if payload["system_prompt"]:
+        lines.extend(["## System Prompt", "", payload["system_prompt"], ""])
+    lines.append("## Messages")
+    for message in payload["messages"]:
+        role = str(message["role"] or "message").strip().title()
+        content = message["content"].strip() or "_empty message_"
+        lines.extend(["", f"### {role}", "", content])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _conversation_export_filename(conv: Conversation, extension: str) -> str:
+    timestamp = conv.updated_at or conv.created_at or datetime.now(timezone.utc)
+    date_part = timestamp.strftime("%Y%m%d")
+    words = re.findall(r"[A-Za-z0-9]+", conv.title or "")
+    slug = "-".join(words).lower()[:60].strip("-") or "conversation"
+    return f"local-llm-{date_part}-{slug}.{extension}"
 
 
 @app.delete("/conversations/{conversation_id}/messages/from/{message_id}")
@@ -567,13 +904,15 @@ def _serialize_worker_switch(deployment: dict) -> dict:
     spec = deployment.get("spec", {})
     status = deployment.get("status", {})
     replicas = int(spec.get("replicas") or 0)
+    desired_state = "on" if replicas > 0 else "off"
     return {
         "worker": labels.get("local-llm.io/worker") or metadata.get("name"),
         "deployment": metadata.get("name"),
         "namespace": metadata.get("namespace"),
         "desired_replicas": replicas,
         "ready_replicas": int(status.get("readyReplicas") or 0),
-        "desired_state": annotations.get("local-llm.io/desired-state") or ("on" if replicas > 0 else "off"),
+        "desired_state": desired_state,
+        "controller_desired_state": annotations.get("local-llm.io/desired-state"),
         "actual_state": annotations.get("local-llm.io/actual-state") or "unknown",
         "last_observed_at": annotations.get("local-llm.io/last-observed-at"),
     }
@@ -627,6 +966,11 @@ async def list_workers(_: dict = Depends(current_user)):
 
     return {
         "workers": workers,
+        "readiness": _worker_readiness_summary(
+            workers,
+            control_available=control_error is None,
+            control_error=control_error,
+        ),
         "control_available": control_error is None,
         "control_error": control_error,
     }
@@ -737,6 +1081,7 @@ async def _persist_chat_result(
     is_new: bool,
     conversation_id: int,
     user_content: str | None,
+    assistant_route: dict | None = None,
 ):
     """Save the result of a chat stream (or clean up if it produced nothing).
 
@@ -765,6 +1110,9 @@ async def _persist_chat_result(
                     conversation_id=conversation_id,
                     role="assistant",
                     content=full_response,
+                    model=assistant_route.get("model") if assistant_route else None,
+                    backend_name=assistant_route.get("backend_name") if assistant_route else None,
+                    model_status=assistant_route.get("model_status") if assistant_route else None,
                 )
             )
             conv.updated_at = datetime.now(timezone.utc)
@@ -861,6 +1209,11 @@ async def chat(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     model_runtime = await ollama_router.model_runtime_status(selected_backend, model)
     model_status = "resident" if model_runtime.get("loaded") else "loading"
+    assistant_route = {
+        "model": model,
+        "backend_name": selected_backend.name,
+        "model_status": model_status,
+    }
 
     async def stream_and_save():
         full_response = ""
@@ -902,6 +1255,7 @@ async def chat(
                         is_new,
                         conversation_id,
                         user_content_to_save,
+                        assistant_route,
                     )
                 )
             except asyncio.CancelledError:

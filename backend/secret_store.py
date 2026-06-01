@@ -1,4 +1,4 @@
-"""Local encrypted storage helpers for integration secrets."""
+"""Local encrypted storage helpers for user-supplied integration secrets."""
 
 import base64
 import hashlib

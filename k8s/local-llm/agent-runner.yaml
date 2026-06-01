@@ -41,6 +41,13 @@ spec:
         - name: agent-runner
           image: ghcr.io/chrischang314/local-llm/agent-runner:latest
           imagePullPolicy: Always
+          command:
+            - uvicorn
+            - agent_runner.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
           ports:
             - name: http
               containerPort: 8080

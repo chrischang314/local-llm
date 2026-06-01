@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, DateTime, Text, Float
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime, timezone
@@ -19,11 +19,14 @@ class User(Base):
     conversations = relationship(
         "Conversation", back_populates="user", cascade="all, delete-orphan"
     )
-    agent_jobs = relationship(
-        "AgentJob", back_populates="user", cascade="all, delete-orphan"
-    )
     github_installations = relationship(
         "GitHubInstallation", back_populates="user", cascade="all, delete-orphan"
+    )
+    github_oauth_configs = relationship(
+        "GitHubOAuthConfig", back_populates="user", cascade="all, delete-orphan"
+    )
+    agent_jobs = relationship(
+        "AgentJob", back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -57,38 +60,15 @@ class Message(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id"))
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    model = Column(String, nullable=True)
+    backend_name = Column(String, nullable=True)
+    model_status = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     conversation = relationship("Conversation", back_populates="messages")
 
 
-class GitHubOAuthServiceConfig(Base):
-    __tablename__ = "github_oauth_service_configs"
-
-    id = Column(Integer, primary_key=True, default=1)
-    client_id = Column(String, nullable=False)
-    client_secret_encrypted = Column(Text, nullable=False)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=utcnow)
-    updated_at = Column(DateTime, default=utcnow)
-
-
-class GitHubOAuthConfig(Base):
-    """Legacy per-user OAuth app config kept for schema compatibility."""
-
-    __tablename__ = "github_oauth_configs"
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
-    client_id = Column(String, nullable=False)
-    client_secret_encrypted = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=utcnow)
-    updated_at = Column(DateTime, default=utcnow)
-
-
 class GitHubInstallState(Base):
     __tablename__ = "github_install_states"
-
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     state = Column(String, unique=True, nullable=False)
@@ -99,9 +79,8 @@ class GitHubInstallState(Base):
 
 class GitHubInstallation(Base):
     __tablename__ = "github_installations"
-
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     installation_id = Column(String, nullable=False)
     account_login = Column(String, nullable=True)
     account_type = Column(String, nullable=True)
@@ -118,54 +97,103 @@ class GitHubInstallation(Base):
     user = relationship("User", back_populates="github_installations")
 
 
+class GitHubOAuthConfig(Base):
+    __tablename__ = "github_oauth_configs"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    client_id = Column(String, nullable=False)
+    client_secret_encrypted = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
+
+    user = relationship("User", back_populates="github_oauth_configs")
+
+
+class GitHubOAuthServiceConfig(Base):
+    __tablename__ = "github_oauth_service_configs"
+    id = Column(Integer, primary_key=True, default=1)
+    client_id = Column(String, nullable=False)
+    client_secret_encrypted = Column(Text, nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
+
+
 class AgentJob(Base):
     __tablename__ = "agent_jobs"
-
     id = Column(String, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    title = Column(String, nullable=False)
-    prompt = Column(Text, nullable=False)
-    status = Column(String, nullable=False, default="queued", index=True)
-    status_detail = Column(Text, nullable=True)
-
-    repository_owner = Column(String, nullable=True)
-    repository_name = Column(String, nullable=True)
-    base_branch = Column(String, nullable=True)
-    target_branch = Column(String, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String, default="queued", nullable=False)
+    repo_full_name = Column(String, nullable=False)
+    base_branch = Column(String, nullable=False)
+    work_branch = Column(String, nullable=True)
+    model = Column(String, nullable=False)
+    task = Column(Text, nullable=False)
+    test_command = Column(Text, nullable=True)
+    push_policy = Column(String, default="direct-main-after-tests", nullable=False)
     commit_sha = Column(String, nullable=True)
-    issue_number = Column(Integer, nullable=True)
-    pull_request_number = Column(Integer, nullable=True)
-
-    github_installation_id = Column(String, nullable=True)
-    github_run_id = Column(String, nullable=True)
-    github_check_run_id = Column(String, nullable=True)
-    dispatch_event = Column(String, nullable=True)
-
-    metadata_json = Column(Text, nullable=False, default="{}")
-    result_json = Column(Text, nullable=True)
+    pr_url = Column(String, nullable=True)
+    error_summary = Column(Text, nullable=True)
+    cancel_requested = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="agent_jobs")
-    events = relationship(
-        "AgentJobEvent",
+    steps = relationship(
+        "AgentJobStep",
         back_populates="job",
-        order_by="AgentJobEvent.id",
+        order_by="AgentJobStep.position",
+        cascade="all, delete-orphan",
+    )
+    logs = relationship(
+        "AgentJobLog",
+        back_populates="job",
+        order_by="AgentJobLog.id",
+        cascade="all, delete-orphan",
+    )
+    artifacts = relationship(
+        "AgentArtifact",
+        back_populates="job",
+        order_by="AgentArtifact.id",
         cascade="all, delete-orphan",
     )
 
 
-class AgentJobEvent(Base):
-    __tablename__ = "agent_job_events"
-
+class AgentJobStep(Base):
+    __tablename__ = "agent_job_steps"
     id = Column(Integer, primary_key=True)
-    job_id = Column(String, ForeignKey("agent_jobs.id"), nullable=False, index=True)
-    status = Column(String, nullable=False)
-    event_type = Column(String, nullable=False, default="state")
-    message = Column(Text, nullable=True)
-    payload_json = Column(Text, nullable=True)
+    job_id = Column(String, ForeignKey("agent_jobs.id"), nullable=False)
+    position = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    status = Column(String, default="pending", nullable=False)
+    exit_code = Column(Integer, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    job = relationship("AgentJob", back_populates="steps")
+
+
+class AgentJobLog(Base):
+    __tablename__ = "agent_job_logs"
+    id = Column(Integer, primary_key=True)
+    job_id = Column(String, ForeignKey("agent_jobs.id"), nullable=False)
+    level = Column(String, default="info", nullable=False)
+    message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=utcnow)
 
-    job = relationship("AgentJob", back_populates="events")
+    job = relationship("AgentJob", back_populates="logs")
+
+
+class AgentArtifact(Base):
+    __tablename__ = "agent_artifacts"
+    id = Column(Integer, primary_key=True)
+    job_id = Column(String, ForeignKey("agent_jobs.id"), nullable=False)
+    kind = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+    job = relationship("AgentJob", back_populates="artifacts")

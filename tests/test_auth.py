@@ -38,6 +38,28 @@ class AuthSecretTests(unittest.TestCase):
 
             self.assertFalse(secret_file.exists())
 
+    def test_token_survives_secret_reload_from_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            secret_file = pathlib.Path(tmp) / "jwt_secret"
+
+            with patch.dict(os.environ, {"JWT_SECRET_FILE": str(secret_file)}, clear=False):
+                os.environ.pop("JWT_SECRET", None)
+                original_secret = auth.JWT_SECRET
+                try:
+                    auth.JWT_SECRET = auth._load_jwt_secret()
+                    token = auth.create_token(42, "browser-session")
+
+                    # Simulate a fresh backend process loading the persisted
+                    # signing key before validating the browser's saved token.
+                    auth.JWT_SECRET = "different-process-secret"
+                    auth.JWT_SECRET = auth._load_jwt_secret()
+                    payload = auth.decode_token(token)
+                finally:
+                    auth.JWT_SECRET = original_secret
+
+            self.assertEqual(payload["sub"], "42")
+            self.assertEqual(payload["username"], "browser-session")
+
 
 if __name__ == "__main__":
     unittest.main()
