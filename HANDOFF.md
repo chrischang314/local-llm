@@ -52,8 +52,9 @@
   `GET /conversations/{id}/export?format=markdown|json`. The chat header export
   button downloads Markdown for the active saved conversation.
 - Frontend runtime libraries are pinned and served from `frontend/vendor/`
-  instead of public CDN URLs. The docs page now presents
-  `http://localllm.lan/v1` as the primary API base URL and keeps
+  instead of public CDN URLs. `scripts/frontend-vendor-assets.json` is the
+  shared manifest used by the copy script and static tests. The docs page now
+  presents `http://localllm.lan/v1` as the primary API base URL and keeps
   `http://localhost:8001/v1` as the Compose/dev fallback.
 
 ## Safe Continuation Notes
@@ -61,9 +62,10 @@
 - Do not commit kubeconfigs, service-account tokens, SSH keys, Docker auth
   files, anything under `.docker-worker/`, or any generated `data/jwt_secret`
   file.
-- Do not commit `node_modules/`. If frontend runtime packages change, use
-  `npm install` and `npm run vendor:frontend`, then review the refreshed
-  `frontend/vendor/` files and `package-lock.json`.
+- Do not commit `node_modules/`. If frontend runtime packages change, update
+  `scripts/frontend-vendor-assets.json`, use `npm install` and
+  `npm run vendor:frontend`, then review the refreshed `frontend/vendor/`
+  files and `package-lock.json`.
 - Do not commit files copied back from `C:\ProgramData\LocalLlmWorker`; that
   directory contains the worker kubeconfig plus local runtime logs.
 - Do not commit GitHub OAuth Client Secrets, OAuth access tokens,

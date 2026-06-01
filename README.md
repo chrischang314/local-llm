@@ -51,9 +51,11 @@ stay out of git.
 The chat page and API docs serve Marked, DOMPurify, Highlight.js, and Lucide
 from `frontend/vendor/` instead of runtime CDN URLs, so the LAN UI keeps
 rendering when public asset CDNs are unreachable. Dependency versions are pinned
-in `package-lock.json`; after changing them, run `npm install` and
-`npm run vendor:frontend`, then commit only the refreshed files under
-`frontend/vendor/`, not `node_modules/`.
+in `package-lock.json` and listed in `scripts/frontend-vendor-assets.json`;
+after changing them, run `npm install` and `npm run vendor:frontend`, then
+commit only the manifest and refreshed files under `frontend/vendor/`, not
+`node_modules/`. The frontend static test checks that the manifest, package
+pins, HTML entrypoints, and vendored files stay in sync.
 
 The API docs use `http://localllm.lan/v1` as the primary OpenAI-compatible base
 URL for the LAN deployment. `http://localhost:8001/v1` remains documented as

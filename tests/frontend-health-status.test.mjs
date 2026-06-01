@@ -5,6 +5,13 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const healthStatus = require("../frontend/health-status.js");
+const vendorManifest = JSON.parse(
+  fs.readFileSync(new URL("../scripts/frontend-vendor-assets.json", import.meta.url), "utf8"),
+);
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 test("compact health label stays ready when Ollama and workers are ready", () => {
   const payload = {
@@ -86,34 +93,49 @@ test("nginx API proxy does not capture health-status static asset", () => {
 });
 
 test("frontend pages use same-origin vendored assets", () => {
-  const pageNames = ["index.html", "docs.html"];
-  const blockedPatterns = [
-    /https:\/\/cdn\.jsdelivr\.net/i,
-    /https:\/\/unpkg\.com/i,
-    /https:\/\/cdnjs\.cloudflare\.com/i,
-    /lucide@latest/i,
-  ];
+  const blockedPatterns = vendorManifest.blockedRuntimeAssetPatterns.map(
+    (pattern) => new RegExp(escapeRegExp(pattern), "i"),
+  );
 
-  for (const pageName of pageNames) {
+  for (const entrypoint of vendorManifest.htmlEntrypoints) {
     const page = fs.readFileSync(
-      new URL(`../frontend/${pageName}`, import.meta.url),
+      new URL(`../${entrypoint}`, import.meta.url),
       "utf8",
     );
     for (const pattern of blockedPatterns) {
-      assert.equal(pattern.test(page), false, `${pageName} should not reference ${pattern}`);
+      assert.equal(pattern.test(page), false, `${entrypoint} should not reference ${pattern}`);
     }
   }
 
-  const requiredAssets = [
-    "../frontend/vendor/marked/4.3.0/marked.min.js",
-    "../frontend/vendor/dompurify/3.4.7/purify.min.js",
-    "../frontend/vendor/highlight.js/11.10.0/highlight.min.js",
-    "../frontend/vendor/highlight.js/11.10.0/styles/github-dark.min.css",
-    "../frontend/vendor/lucide/0.468.0/lucide.min.js",
-  ];
+  for (const asset of vendorManifest.assets) {
+    assert.equal(
+      fs.existsSync(new URL(`../${asset.destination}`, import.meta.url)),
+      true,
+      `${asset.destination} should exist`,
+    );
 
-  for (const assetPath of requiredAssets) {
-    assert.equal(fs.existsSync(new URL(assetPath, import.meta.url)), true, `${assetPath} should exist`);
+    for (const entrypoint of asset.usedBy) {
+      const page = fs.readFileSync(new URL(`../${entrypoint}`, import.meta.url), "utf8");
+      assert.match(
+        page,
+        new RegExp(escapeRegExp(asset.runtimePath)),
+        `${entrypoint} should load ${asset.runtimePath}`,
+      );
+    }
+  }
+});
+
+test("frontend vendor manifest matches package pins", () => {
+  const packageJson = JSON.parse(
+    fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  const packageLock = JSON.parse(
+    fs.readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
+  );
+
+  for (const asset of vendorManifest.assets) {
+    assert.equal(packageJson.devDependencies[asset.packageName], asset.version);
+    assert.equal(packageLock.packages[`node_modules/${asset.packageName}`].version, asset.version);
   }
 });
 
