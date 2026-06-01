@@ -51,11 +51,14 @@ from auth import (
     hash_password,
     verify_password,
 )
+from agent_job_routes import router as agent_job_router
 from database import AsyncSessionLocal, Base, engine, get_db, migrate_schema
+from github_routes import router as github_router
 from models import Conversation
 from models import Message as DBMessage
 from models import User
 from ollama_router import ollama_router
+from research_client import build_research_context, build_sources_footer, research_status, research_web
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 K8S_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE")
@@ -82,8 +85,17 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Conversation-Id", "X-LLM-Backend"],
+    expose_headers=[
+        "X-Conversation-Id",
+        "X-LLM-Backend",
+        "X-LLM-Model-Status",
+        "X-Research-Status",
+        "X-Research-Source-Count",
+    ],
 )
+
+app.include_router(agent_job_router)
+app.include_router(github_router)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +131,8 @@ class ChatRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
+    web_research: bool = False
+    research_query: str | None = None
 
 
 class ConversationCreate(BaseModel):
@@ -145,6 +159,55 @@ class ModelPullRequest(BaseModel):
 
 class WorkerToggleRequest(BaseModel):
     enabled: bool
+
+
+async def _maybe_build_research_context(
+    requested: bool,
+    messages: list,
+    query_override: str | None = None,
+) -> tuple[str, dict[str, str], str]:
+    if not requested:
+        return "", {
+            "X-Research-Status": "not_requested",
+            "X-Research-Source-Count": "0",
+        }, ""
+    query = query_override or _latest_user_message(messages)
+    result = await research_web(query)
+    return build_research_context(result), {
+        "X-Research-Status": result.status,
+        "X-Research-Source-Count": str(len(result.sources)),
+    }, build_sources_footer(result)
+
+
+def _latest_user_message(messages: list) -> str:
+    for message in reversed(messages):
+        role = _message_field(message, "role")
+        content = _message_field(message, "content")
+        if role == "user" and content:
+            return str(content)
+    return ""
+
+
+def _message_field(message, field: str):
+    if isinstance(message, dict):
+        return message.get(field)
+    return getattr(message, field, None)
+
+
+def _insert_research_context(messages: list[dict], research_context: str) -> list[dict]:
+    if not research_context:
+        return messages
+    insertion_index = 0
+    while (
+        insertion_index < len(messages)
+        and messages[insertion_index].get("role") == "system"
+    ):
+        insertion_index += 1
+    return (
+        messages[:insertion_index]
+        + [{"role": "system", "content": research_context}]
+        + messages[insertion_index:]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +324,12 @@ def _health_worker_summary(models_payload: dict) -> dict:
         "busy": busy,
         "loaded_model_count": loaded_model_count,
     }
+
+
+@app.get("/research/status")
+async def get_research_status(_: dict = Depends(current_user)):
+    """Return non-secret web research configuration for the signed-in UI."""
+    return research_status()
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +844,13 @@ async def chat(
     ollama_messages: list[dict] = []
     if system_prompt:
         ollama_messages.append({"role": "system", "content": system_prompt})
+    research_context, research_headers, research_sources_footer = await _maybe_build_research_context(
+        request.web_research,
+        request.messages,
+        request.research_query,
+    )
     ollama_messages.extend(m.model_dump() for m in request.messages)
+    ollama_messages = _insert_research_context(ollama_messages, research_context)
 
     user_content = request.messages[-1].content if request.messages else ""
     # For regenerate, the user message is already in the DB.
@@ -812,6 +887,9 @@ async def chat(
                             elif content := data.get("message", {}).get("content"):
                                 full_response += content
                                 yield content
+            if full_response and research_sources_footer:
+                full_response += research_sources_footer
+                yield research_sources_footer
         except httpx.HTTPError as e:
             yield f"[Error: {selected_backend.name} is unavailable: {e}]"
         finally:
@@ -838,6 +916,7 @@ async def chat(
             "X-LLM-Model-Status": model_status,
             "X-LLM-Model-Loaded": "true" if model_runtime.get("loaded") else "false",
             "X-LLM-Model-Expires-At": model_runtime.get("expires_at") or "",
+            **research_headers,
         },
     )
 
@@ -858,6 +937,8 @@ class ApiChatRequest(BaseModel):
     stream: bool = False
     temperature: float | None = None
     max_tokens: int | None = None
+    web_research: bool = False
+    research_query: str | None = None
 
 
 @app.get("/v1/models")
@@ -884,6 +965,13 @@ async def v1_list_models():
 async def v1_chat_completions(request: ApiChatRequest):
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
+    api_messages = [m.model_dump() for m in request.messages]
+    research_context, research_headers, research_sources_footer = await _maybe_build_research_context(
+        request.web_research,
+        request.messages,
+        request.research_query,
+    )
+    api_messages = _insert_research_context(api_messages, research_context)
     try:
         selected_backend = await ollama_router.choose_backend(request.model)
     except RuntimeError as exc:
@@ -894,6 +982,7 @@ async def v1_chat_completions(request: ApiChatRequest):
         "X-LLM-Model-Status": "resident" if model_runtime.get("loaded") else "loading",
         "X-LLM-Model-Loaded": "true" if model_runtime.get("loaded") else "false",
         "X-LLM-Model-Expires-At": model_runtime.get("expires_at") or "",
+        **research_headers,
     }
 
     options = {}
@@ -904,7 +993,7 @@ async def v1_chat_completions(request: ApiChatRequest):
 
     ollama_payload = {
         "model": request.model,
-        "messages": [m.model_dump() for m in request.messages],
+        "messages": api_messages,
         "stream": request.stream,
     }
     if options:
@@ -912,6 +1001,7 @@ async def v1_chat_completions(request: ApiChatRequest):
 
     if request.stream:
         async def sse_stream():
+            full_response = ""
             try:
                 async with ollama_router.track_request(selected_backend):
                     async with httpx.AsyncClient(timeout=None) as client:
@@ -940,19 +1030,47 @@ async def v1_chat_completions(request: ApiChatRequest):
                                     yield f"data: {json.dumps(error_chunk)}\n\n"
                                     break
                                 content = data.get("message", {}).get("content", "")
+                                full_response += content
                                 done = data.get("done", False)
-                                chunk = {
-                                    "id": completion_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": created,
-                                    "model": request.model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {"role": "assistant", "content": content} if not done else {},
-                                        "finish_reason": "stop" if done else None,
-                                    }],
-                                }
-                                yield f"data: {json.dumps(chunk)}\n\n"
+                                if content:
+                                    chunk = {
+                                        "id": completion_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created,
+                                        "model": request.model,
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {"role": "assistant", "content": content},
+                                            "finish_reason": None,
+                                        }],
+                                    }
+                                    yield f"data: {json.dumps(chunk)}\n\n"
+                                if done:
+                                    if full_response and research_sources_footer:
+                                        sources_chunk = {
+                                            "id": completion_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created,
+                                            "model": request.model,
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {"content": research_sources_footer},
+                                                "finish_reason": None,
+                                            }],
+                                        }
+                                        yield f"data: {json.dumps(sources_chunk)}\n\n"
+                                    done_chunk = {
+                                        "id": completion_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created,
+                                        "model": request.model,
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {},
+                                            "finish_reason": "stop",
+                                        }],
+                                    }
+                                    yield f"data: {json.dumps(done_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
             except httpx.HTTPError:
                 yield "data: [DONE]\n\n"
@@ -974,6 +1092,9 @@ async def v1_chat_completions(request: ApiChatRequest):
     if err := data.get("error"):
         raise HTTPException(status_code=502, detail=err)
 
+    assistant_content = data.get("message", {}).get("content", "")
+    if assistant_content and research_sources_footer:
+        assistant_content += research_sources_footer
     completion_tokens = data.get("eval_count", 0)
     prompt_tokens = data.get("prompt_eval_count", 0)
 
@@ -985,7 +1106,7 @@ async def v1_chat_completions(request: ApiChatRequest):
             "model": request.model,
             "choices": [{
                 "index": 0,
-                "message": {"role": "assistant", "content": data.get("message", {}).get("content", "")},
+                "message": {"role": "assistant", "content": assistant_content},
                 "finish_reason": "stop",
             }],
             "usage": {

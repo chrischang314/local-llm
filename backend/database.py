@@ -38,12 +38,17 @@ _NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("conversations", "temperature", "REAL DEFAULT 0.7"),
     ("conversations", "top_p", "REAL DEFAULT 0.9"),
     ("conversations", "top_k", "INTEGER DEFAULT 40"),
+    ("github_installations", "auth_type", "TEXT DEFAULT 'app' NOT NULL"),
+    ("github_installations", "access_token_encrypted", "TEXT"),
+    ("github_installations", "token_scope", "TEXT"),
+    ("github_installations", "token_type", "TEXT"),
 ]
 
 
 async def migrate_schema():
     """Add any missing columns to existing tables. Idempotent."""
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
         for table, column, definition in _NEW_COLUMNS:
             result = await conn.execute(text(f"PRAGMA table_info({table})"))
             existing = {row[1] for row in result.fetchall()}

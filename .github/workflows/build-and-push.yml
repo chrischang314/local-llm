@@ -66,6 +66,8 @@ jobs:
             context: ./backend
           - name: frontend
             context: ./frontend
+          - name: agent-runner
+            context: ./agent-runner
     steps:
       - uses: actions/checkout@v4
 

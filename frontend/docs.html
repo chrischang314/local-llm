@@ -26,6 +26,9 @@
         <span class="nav-section">Endpoints</span>
         <a href="#list-models">GET /v1/models</a>
         <a href="#chat-completions">POST /v1/chat/completions</a>
+        <a href="#github-integration">GET /github/*</a>
+        <a href="#code-jobs-api">GET/POST /agent/jobs</a>
+        <a href="#frontend-routes">Frontend routes</a>
         <span class="nav-section">Examples</span>
         <a href="#example-curl">cURL</a>
         <a href="#example-python">Python</a>
@@ -49,6 +52,11 @@
           <h2>Base URL</h2>
         </div>
         <p>Docker compose exposes the backend on port <code>8001</code>.</p>
+        <p>
+          The browser UI uses same-origin paths through nginx. Keep frontend calls
+          relative, such as <code>/v1/models</code>, <code>/github/status</code>, and
+          <code>/agent/jobs</code>.
+        </p>
 
         <div class="code-block">
           <div class="code-label">OpenAI SDK base URL</div>
@@ -140,8 +148,28 @@
               <td>No</td>
               <td>Maximum generated tokens.</td>
             </tr>
+            <tr>
+              <td><code>web_research</code></td>
+              <td>boolean</td>
+              <td>No</td>
+              <td>Fetch current web sources and add them to the model context when <code>true</code>.</td>
+            </tr>
+            <tr>
+              <td><code>research_query</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>Optional explicit search query. Defaults to the latest user message.</td>
+            </tr>
           </tbody>
         </table>
+
+        <p>
+          Research responses include <code>X-Research-Status</code> and
+          <code>X-Research-Source-Count</code> headers. When web sources are
+          retrieved, the backend appends a <code>Sources</code> footer with full
+          URLs after the model answer. The chat UI Research toggle applies to
+          one message and then resets.
+        </p>
 
         <h3>Response</h3>
         <div class="code-block">
@@ -179,6 +207,187 @@ data: [DONE]</code></pre>
         </div>
       </section>
 
+      <section id="github-integration">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="github" aria-hidden="true"></i></span>
+          <h2>GitHub Integration</h2>
+        </div>
+        <p>
+          The Code Jobs workspace uses a service-style GitHub OAuth flow. The OAuth App is
+          configured once for Local LLM, then each user clicks <strong>Sign in with GitHub</strong>
+          and authorizes on github.com.
+        </p>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/github/status</span>
+        </div>
+        <p>Returns whether the OAuth App is configured and whether the current Local LLM user is connected.</p>
+
+        <div class="code-block">
+          <div class="code-label">Response</div>
+          <pre><code>{
+  "configured": true,
+  "connected": true,
+  "mode": "oauth",
+  "oauth": {
+    "configured": true,
+    "callback_url": "http://localllm.lan/github/oauth/callback"
+  },
+  "connection": {
+    "auth_type": "oauth",
+    "account_login": "octocat",
+    "repository_selection": "all-visible-to-token"
+  }
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/github/oauth/config</span>
+        </div>
+        <p>
+          Saves the one-time service OAuth Client ID and Client Secret. These are stored
+          encrypted locally; regular users do not need to paste keys before signing in.
+        </p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/github/oauth/start</span>
+        </div>
+        <p>Returns a GitHub authorization URL for the current Local LLM user.</p>
+
+        <div class="code-block">
+          <div class="code-label">Response</div>
+          <pre><code>{
+  "configured": true,
+  "auth_url": "https://github.com/login/oauth/authorize?...",
+  "callback_url": "http://localllm.lan/github/oauth/callback",
+  "mode": "oauth"
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/github/repositories</span>
+        </div>
+        <p>
+          Repository browsing for the signed-in GitHub user.
+        </p>
+
+        <div class="code-block">
+          <div class="code-label">Response</div>
+          <pre><code>{
+  "repositories": [
+    {
+      "full_name": "chris/local-llm",
+      "default_branch": "main",
+      "html_url": "https://github.com/chris/local-llm"
+    }
+  ]
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="code-jobs-api">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="square-terminal" aria-hidden="true"></i></span>
+          <h2>Code Jobs</h2>
+        </div>
+        <p>
+          Code Jobs are agentic coding tasks launched from the frontend. The UI is defensive:
+          if these routes are not available yet, it shows an unavailable state instead of
+          affecting chat.
+        </p>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/agent/jobs</span>
+        </div>
+        <p>Lists queued, running, and completed jobs.</p>
+
+        <div class="endpoint">
+          <span class="method post">POST</span>
+          <span class="path">/agent/jobs</span>
+        </div>
+        <p>Starts a new code job.</p>
+
+        <div class="code-block">
+          <div class="code-label">Request</div>
+          <pre><code>{
+  "title": "Add repository picker",
+  "prompt": "Build the UI and update docs.",
+  "repository_owner": "chris",
+  "repository_name": "local-llm",
+  "base_branch": "main",
+  "target_branch": "codex/repository-picker",
+  "dispatch": true,
+  "metadata": {
+    "mode": "implement",
+    "run_tests": true,
+    "open_pull_request": true
+  }
+}</code></pre>
+        </div>
+
+        <div class="code-block">
+          <div class="code-label">Response</div>
+          <pre><code>{
+  "id": "job_123",
+  "title": "Add repository picker",
+  "status": "queued",
+  "repository": {
+    "owner": "chris",
+    "name": "local-llm"
+  },
+  "target_branch": "codex/repository-picker"
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+          <span class="method get">GET</span>
+          <span class="path">/agent/jobs/{id}</span>
+        </div>
+        <p>Returns the latest status, summary, logs, branch link, and pull request link for a job.</p>
+      </section>
+
+      <section id="frontend-routes">
+        <div class="section-heading">
+          <span class="section-icon"><i data-lucide="route" aria-hidden="true"></i></span>
+          <h2>Frontend Routes</h2>
+        </div>
+        <p>
+          The static frontend should not hard-code backend hosts. nginx proxies these
+          backend prefixes from the same origin:
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Prefix</th>
+              <th>Used by</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/github</code></td>
+              <td>GitHub connection status and repository picker.</td>
+            </tr>
+            <tr>
+              <td><code>/agent</code></td>
+              <td>Code Jobs list, create form, and detail panel.</td>
+            </tr>
+            <tr>
+              <td><code>/research</code></td>
+              <td>Web research status for the signed-in UI.</td>
+            </tr>
+            <tr>
+              <td><code>/v1</code></td>
+              <td>OpenAI-compatible API consumers.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
       <section id="example-curl">
         <div class="section-heading">
           <span class="section-icon"><i data-lucide="terminal" aria-hidden="true"></i></span>
@@ -197,6 +406,18 @@ data: [DONE]</code></pre>
     "messages": [
       { "role": "user", "content": "What is Docker?" }
     ]
+  }'</code></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label">Chat with web research</div>
+          <pre><code>curl http://localhost:8001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:3b",
+    "messages": [
+      { "role": "user", "content": "What changed in Kubernetes this week? Cite sources." }
+    ],
+    "web_research": true
   }'</code></pre>
         </div>
         <div class="code-block">

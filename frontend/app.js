@@ -39,6 +39,15 @@ let conversations = [];
 let isStreaming = false;
 let streamAbortController = null;
 let loginMode = "login"; // or "register"
+let currentWorkspace = "chat";
+let codeWorkspaceLoaded = false;
+let githubRepositories = [];
+let codeJobs = [];
+let selectedCodeJobId = null;
+let githubStatus = null;
+let githubOauthNotice = null;
+let webResearchEnabled = false;
+let webResearchAvailable = true;
 
 /* ---------- DOM refs ---------- */
 
@@ -65,6 +74,40 @@ const modelSelect = $("model-select");
 const chatTitle = $("chat-title");
 const tokenCounter = $("token-counter");
 const healthIndicator = $("health-indicator");
+const researchToggle = $("research-toggle");
+const chatWorkspaceBtn = $("chat-workspace-btn");
+const codeWorkspaceBtn = $("code-workspace-btn");
+const chatWorkspace = document.querySelector(".main");
+const codeWorkspace = $("code-workspace");
+const githubRefreshBtn = $("github-refresh-btn");
+const jobsRefreshBtn = $("jobs-refresh-btn");
+const githubStatusPill = $("github-status-pill");
+const githubSummary = $("github-summary");
+const githubRepoSelect = $("github-repo-select");
+const githubConnectBtn = $("github-connect-btn");
+const githubDisconnectBtn = $("github-disconnect-btn");
+const githubOauthSetup = $("github-oauth-setup");
+const githubOauthCallbackUrl = $("github-oauth-callback-url");
+const githubOauthClientId = $("github-oauth-client-id");
+const githubOauthClientSecret = $("github-oauth-client-secret");
+const githubOauthSaveBtn = $("github-oauth-save-btn");
+const githubOauthConfigStatus = $("github-oauth-config-status");
+const codeJobForm = $("code-job-form");
+const jobTitleInput = $("job-title-input");
+const jobRepoSelect = $("job-repo-select");
+const jobRepoUrlInput = $("job-repo-url-input");
+const jobBaseBranchInput = $("job-base-branch-input");
+const jobWorkBranchInput = $("job-work-branch-input");
+const jobModeSelect = $("job-mode-select");
+const jobPromptInput = $("job-prompt-input");
+const jobDispatch = $("job-dispatch");
+const jobRunTests = $("job-run-tests");
+const jobOpenPr = $("job-open-pr");
+const jobSubmitBtn = $("job-submit-btn");
+const jobFormStatus = $("job-form-status");
+const jobsCountPill = $("jobs-count-pill");
+const jobsList = $("jobs-list");
+const jobDetail = $("job-detail");
 
 // Settings modal
 const settingsModal = $("settings-modal");
@@ -109,6 +152,24 @@ async function apiJson(path, opts = {}) {
   return res.json();
 }
 
+async function apiJsonAny(paths, opts = {}) {
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      return await apiJson(path, opts);
+    } catch (err) {
+      lastError = err;
+      if (!isMissingEndpointError(err)) break;
+    }
+  }
+  throw lastError || new Error("No API route configured");
+}
+
+function isMissingEndpointError(err) {
+  const message = String(err?.message || "");
+  return message.includes("(404)") || /not found/i.test(message);
+}
+
 /* ---------- Init ---------- */
 
 async function init() {
@@ -119,10 +180,28 @@ async function init() {
       authToken = parsed.token;
       currentUser = { id: parsed.id, username: parsed.username };
       await loadApp();
+      handleGithubOAuthReturn();
       return;
     } catch {}
   }
   showLogin();
+}
+
+function handleGithubOAuthReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const result = params.get("github_oauth");
+  if (!result) return;
+  const message = params.get("message");
+  githubOauthNotice =
+    result === "connected"
+      ? { tone: "success", text: "GitHub sign-in completed." }
+      : { tone: "error", text: `GitHub sign-in failed: ${message || "unknown error"}` };
+  params.delete("github_oauth");
+  params.delete("message");
+  const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+  window.history.replaceState({}, document.title, next);
+  switchWorkspace("code");
+  refreshCodeWorkspace();
 }
 
 function showLogin() {
@@ -134,7 +213,9 @@ async function loadApp() {
   loginScreen.classList.add("hidden");
   appEl.classList.remove("hidden");
   sidebarUsername.textContent = currentUser.username;
-  await Promise.all([loadModels(), loadConversations(), refreshHealth()]);
+  switchWorkspace("chat", { skipLoad: true });
+  updateResearchToggle();
+  await Promise.all([loadModels(), loadConversations(), refreshHealth(), refreshResearchStatus()]);
   showEmptyState();
   // Refresh health every 15s so the indicator catches Ollama coming back online.
   setInterval(refreshHealth, 15000);
@@ -202,6 +283,52 @@ function handleLogout() {
 
 logoutBtn.addEventListener("click", handleLogout);
 
+/* ---------- Workspace navigation ---------- */
+
+chatWorkspaceBtn?.addEventListener("click", () => switchWorkspace("chat"));
+codeWorkspaceBtn?.addEventListener("click", () => switchWorkspace("code"));
+githubRefreshBtn?.addEventListener("click", refreshGitHubIntegration);
+jobsRefreshBtn?.addEventListener("click", refreshCodeJobs);
+codeJobForm?.addEventListener("submit", createCodeJob);
+githubConnectBtn?.addEventListener("click", startGithubSignIn);
+githubDisconnectBtn?.addEventListener("click", disconnectGithub);
+githubOauthSaveBtn?.addEventListener("click", saveGithubOAuthConfig);
+
+githubRepoSelect?.addEventListener("change", () => {
+  if (githubRepoSelect.value && jobRepoSelect) {
+    jobRepoSelect.value = githubRepoSelect.value;
+    applyRepositoryDefaults(githubRepoSelect.value);
+  }
+});
+
+jobRepoSelect?.addEventListener("change", () => {
+  if (jobRepoSelect.value) {
+    jobRepoUrlInput.value = "";
+    applyRepositoryDefaults(jobRepoSelect.value);
+  }
+});
+
+function switchWorkspace(target, { skipLoad = false } = {}) {
+  currentWorkspace = target;
+  const isCode = target === "code";
+
+  chatWorkspace?.classList.toggle("hidden", isCode);
+  codeWorkspace?.classList.toggle("hidden", !isCode);
+  chatWorkspaceBtn?.classList.toggle("active", !isCode);
+  codeWorkspaceBtn?.classList.toggle("active", isCode);
+  chatWorkspaceBtn?.setAttribute("aria-selected", String(!isCode));
+  codeWorkspaceBtn?.setAttribute("aria-selected", String(isCode));
+
+  if (isCode && !skipLoad && !codeWorkspaceLoaded) {
+    codeWorkspaceLoaded = true;
+    refreshCodeWorkspace();
+  }
+}
+
+async function refreshCodeWorkspace() {
+  await Promise.allSettled([refreshGitHubIntegration(), refreshCodeJobs()]);
+}
+
 /* ---------- Health ---------- */
 
 async function refreshHealth() {
@@ -239,6 +366,34 @@ function formatHealthWorkers(workers) {
       : "";
   return ` - ${available}/${workers.enabled} ${workerWord}${busy}`;
 }
+
+async function refreshResearchStatus() {
+  try {
+    const data = await apiJson("/research/status");
+    webResearchAvailable = data.enabled !== false;
+    if (!webResearchAvailable) webResearchEnabled = false;
+  } catch {
+    webResearchAvailable = false;
+    webResearchEnabled = false;
+  }
+  updateResearchToggle();
+}
+
+function updateResearchToggle() {
+  if (!researchToggle) return;
+  researchToggle.classList.toggle("active", webResearchEnabled && webResearchAvailable);
+  researchToggle.disabled = !webResearchAvailable || isStreaming;
+  researchToggle.setAttribute("aria-pressed", String(webResearchEnabled && webResearchAvailable));
+  researchToggle.title = webResearchAvailable
+    ? "Use web research"
+    : "Web research unavailable";
+}
+
+researchToggle?.addEventListener("click", () => {
+  if (!webResearchAvailable || isStreaming) return;
+  webResearchEnabled = !webResearchEnabled;
+  updateResearchToggle();
+});
 
 /* ---------- Models ---------- */
 
@@ -410,6 +565,7 @@ async function deleteConversation(id) {
 
 newChatBtn.addEventListener("click", () => {
   if (isStreaming) return;
+  switchWorkspace("chat", { skipLoad: true });
   currentConversationId = null;
   currentConversation = null;
   messages = [];
@@ -640,6 +796,31 @@ async function sendMessageContent(content) {
   await runChatStream({ regenerate: false });
 }
 
+function setStreamStatus(bubble, cursor, currentStatusEl, text) {
+  if (!text) {
+    currentStatusEl?.remove();
+    return null;
+  }
+  const el = currentStatusEl || document.createElement("span");
+  el.className = "stream-status";
+  el.textContent = text;
+  if (!el.parentElement) {
+    bubble.insertBefore(el, cursor);
+  }
+  return el;
+}
+
+function researchStatusText(status, sourceCount) {
+  if (status === "ok" && sourceCount > 0) {
+    const sourceWord = sourceCount === 1 ? "source" : "sources";
+    return `Using ${sourceCount} web ${sourceWord}...`;
+  }
+  if (status === "disabled") return "Web research disabled...";
+  if (status === "empty") return "No web sources found...";
+  if (status === "error") return "Research unavailable...";
+  return "Searching web...";
+}
+
 async function runChatStream({ regenerate }) {
   const model = modelSelect.value;
   const bubble = appendMessage("assistant", "", { skipActions: true });
@@ -653,6 +834,7 @@ async function runChatStream({ regenerate }) {
   let assistantContent = "";
   let aborted = false;
   let statusEl = null;
+  const useResearch = webResearchEnabled && webResearchAvailable;
 
   try {
     const body = {
@@ -660,6 +842,10 @@ async function runChatStream({ regenerate }) {
       conversation_id: currentConversationId,
       regenerate,
     };
+    if (useResearch) {
+      body.web_research = true;
+      statusEl = setStreamStatus(bubble, cursor, statusEl, "Searching web...");
+    }
     // Settings only ship to the backend for the first message of a new
     // conversation; thereafter the backend reads them from the DB row.
     if (!currentConversationId) {
@@ -688,11 +874,24 @@ async function runChatStream({ regenerate }) {
 
     const backendName = res.headers.get("X-LLM-Backend");
     const modelStatus = res.headers.get("X-LLM-Model-Status");
+    if (useResearch) {
+      const researchStatus = res.headers.get("X-Research-Status");
+      const sourceCount = parseInt(res.headers.get("X-Research-Source-Count") || "0", 10);
+      statusEl = setStreamStatus(
+        bubble,
+        cursor,
+        statusEl,
+        researchStatusText(researchStatus, sourceCount)
+      );
+    }
     if (modelStatus === "loading") {
-      statusEl = document.createElement("span");
-      statusEl.className = "stream-status";
-      statusEl.textContent = `Loading ${model} on ${backendName || "worker"}...`;
-      bubble.insertBefore(statusEl, cursor);
+      const loadingText = `Loading ${model} on ${backendName || "worker"}...`;
+      statusEl = setStreamStatus(
+        bubble,
+        cursor,
+        statusEl,
+        statusEl ? `${statusEl.textContent} ${loadingText}` : loadingText
+      );
     }
 
     const reader = res.body.getReader();
@@ -724,6 +923,9 @@ async function runChatStream({ regenerate }) {
   } finally {
     if (statusEl) statusEl.remove();
     cursor.remove();
+    if (useResearch) {
+      webResearchEnabled = false;
+    }
     if (assistantContent) {
       enhanceCodeBlocks(bubble);
       messages.push({ role: "assistant", content: assistantContent });
@@ -765,6 +967,7 @@ function setStreaming(active) {
   isStreaming = active;
   sendBtn.disabled = active;
   inputEl.disabled = active;
+  updateResearchToggle();
   stopBtn.classList.toggle("hidden", !active);
   sendBtn.classList.toggle("hidden", active);
 }
@@ -786,6 +989,594 @@ inputEl.addEventListener("keydown", (e) => {
   }
 });
 sendBtn.addEventListener("click", sendMessage);
+
+/* ---------- Code Jobs workspace ---------- */
+
+async function refreshGitHubIntegration() {
+  if (!githubStatusPill || !githubSummary) return;
+
+  setGithubStatus("checking", "warning", "Checking GitHub integration...");
+  let statusRepositories = [];
+  try {
+    githubStatus = await apiJson("/github/status");
+    renderGithubStatus(githubStatus);
+    statusRepositories = repositoriesFromGithubStatus(githubStatus);
+  } catch (err) {
+    githubStatus = null;
+    setGithubStatus(
+      "setup needed",
+      "warning",
+      `GitHub status unavailable: ${err.message}. Backend integration may not be installed yet.`
+    );
+  }
+
+  try {
+    const payload = await apiJsonAny(["/github/repositories", "/github/repos"]);
+    githubRepositories = normalizeRepositories(payload);
+    renderRepositoryOptions();
+    if (githubRepositories.length) {
+      const repoWord = githubRepositories.length === 1 ? "repository" : "repositories";
+      githubSummary.textContent = `${githubRepositories.length} ${repoWord} available for code jobs.`;
+    }
+  } catch (err) {
+    githubRepositories = statusRepositories;
+    if (githubRepositories.length) {
+      renderRepositoryOptions();
+      const repo = githubRepositories[0].full_name;
+      githubSummary.textContent = `Using configured default repository ${repo}. Repository browsing is unavailable: ${err.message}.`;
+    } else {
+      renderRepositoryOptions(`Repositories unavailable: ${err.message}`);
+    }
+  }
+}
+
+function setGithubStatus(label, tone, summary) {
+  githubStatusPill.textContent = label;
+  githubStatusPill.dataset.tone = tone;
+  githubSummary.textContent = summary;
+}
+
+function renderGithubStatus(status) {
+  const connected = Boolean(status.connected ?? status.authenticated ?? status.ok ?? false);
+  const configured = Boolean(status.configured ?? status.oauth?.configured ?? false);
+  const account =
+    status.connection?.account_login ||
+    status.installation?.account_login ||
+    status.account ||
+    status.username ||
+    status.login ||
+    status.user?.login ||
+    status.user?.name ||
+    repositoriesFromGithubStatus(status)[0]?.full_name ||
+    "GitHub";
+  const detail = status.error || status.detail || status.message || "";
+  const rateLimit = status.rate_limit?.remaining ?? status.rateLimit?.remaining;
+
+  if (githubOauthCallbackUrl && status.oauth?.callback_url) {
+    githubOauthCallbackUrl.value = status.oauth.callback_url;
+  }
+  if (githubOauthSetup) githubOauthSetup.classList.toggle("hidden", configured);
+  if (githubConnectBtn) {
+    githubConnectBtn.disabled = !configured;
+    githubConnectBtn.querySelector("span").textContent = connected ? "Reconnect GitHub" : "Sign in with GitHub";
+  }
+  githubDisconnectBtn?.classList.toggle("hidden", !connected);
+
+  if (githubOauthNotice && githubOauthConfigStatus) {
+    githubOauthConfigStatus.textContent = githubOauthNotice.text;
+    githubOauthConfigStatus.classList.remove("error", "success");
+    githubOauthConfigStatus.classList.add(githubOauthNotice.tone);
+    githubOauthNotice = null;
+  }
+
+  if (connected) {
+    const limitText = Number.isFinite(rateLimit) ? ` API remaining: ${rateLimit}.` : "";
+    setGithubStatus("connected", "success", `Signed in as ${account}.${limitText}`);
+  } else if (configured) {
+    setGithubStatus(
+      "ready",
+      "warning",
+      "GitHub OAuth is ready. Sign in with GitHub to authorize this browser account."
+    );
+  } else {
+    setGithubStatus(
+      "setup needed",
+      "warning",
+      detail || "Set up the Local LLM GitHub OAuth App once, then every user can sign in with GitHub."
+    );
+  }
+}
+
+async function saveGithubOAuthConfig() {
+  const clientId = githubOauthClientId?.value.trim() || "";
+  const clientSecret = githubOauthClientSecret?.value.trim() || "";
+  if (!clientId || !clientSecret) {
+    if (githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent = "Client ID and Client Secret are required for the one-time service setup.";
+      githubOauthConfigStatus.classList.add("error");
+    }
+    return;
+  }
+
+  if (githubOauthConfigStatus) {
+    githubOauthConfigStatus.textContent = "Saving GitHub OAuth App...";
+    githubOauthConfigStatus.classList.remove("error", "success");
+  }
+
+  try {
+    await apiJson("/github/oauth/config", {
+      method: "POST",
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    });
+    if (githubOauthClientSecret) githubOauthClientSecret.value = "";
+    if (githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent = "GitHub OAuth App saved. Users can now sign in with GitHub.";
+      githubOauthConfigStatus.classList.add("success");
+    }
+    await refreshGitHubIntegration();
+  } catch (err) {
+    if (githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent = err.message;
+      githubOauthConfigStatus.classList.add("error");
+    }
+  }
+}
+
+async function startGithubSignIn() {
+  try {
+    const data = await apiJson("/github/oauth/start", { method: "POST" });
+    if (!data.configured || !data.auth_url) {
+      if (githubOauthConfigStatus) {
+        githubOauthConfigStatus.textContent = `GitHub OAuth is not configured: ${(data.missing || []).join(", ")}`;
+        githubOauthConfigStatus.classList.add("error");
+      }
+      return;
+    }
+    window.location.href = data.auth_url;
+  } catch (err) {
+    if (githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent = `GitHub sign-in failed to start: ${err.message}`;
+      githubOauthConfigStatus.classList.add("error");
+    } else {
+      alert(`GitHub sign-in failed to start: ${err.message}`);
+    }
+  }
+}
+
+async function disconnectGithub() {
+  try {
+    await apiJson("/github/install", { method: "DELETE" });
+    await refreshGitHubIntegration();
+  } catch (err) {
+    if (githubOauthConfigStatus) {
+      githubOauthConfigStatus.textContent = `GitHub disconnect failed: ${err.message}`;
+      githubOauthConfigStatus.classList.add("error");
+    }
+  }
+}
+
+function repositoriesFromGithubStatus(status) {
+  const repo = status.default_repository || status.defaultRepository;
+  const owner = repo?.owner;
+  const name = repo?.name;
+  if (!owner || !name) return [];
+  return [{
+    id: `${owner}/${name}`,
+    full_name: `${owner}/${name}`,
+    name,
+    default_branch: repo.default_branch || repo.defaultBranch || "main",
+    html_url: `https://github.com/${owner}/${name}`,
+  }];
+}
+
+function normalizeRepositories(payload) {
+  const items = Array.isArray(payload)
+    ? payload
+    : payload.repositories || payload.repos || payload.data || payload.items || [];
+
+  return items
+    .map((repo) => {
+      if (typeof repo === "string") {
+        return { id: repo, full_name: repo, name: repo, default_branch: "main" };
+      }
+      const fullName =
+        repo.full_name ||
+        repo.fullName ||
+        repo.slug ||
+        repo.repository ||
+        repo.name_with_owner ||
+        repo.name;
+      if (!fullName) return null;
+      return {
+        id: String(repo.id ?? fullName),
+        full_name: fullName,
+        name: repo.name || fullName,
+        default_branch: repo.default_branch || repo.defaultBranch || "main",
+        html_url: repo.html_url || repo.web_url || repo.url || "",
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+}
+
+function renderRepositoryOptions(errorText) {
+  replaceRepoOptions(githubRepoSelect, errorText || "Select repository", githubRepositories);
+  replaceRepoOptions(jobRepoSelect, "Select from GitHub or enter below", githubRepositories);
+}
+
+function replaceRepoOptions(select, placeholder, repositories) {
+  if (!select) return;
+  const previous = select.value;
+  select.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = placeholder;
+  select.appendChild(empty);
+
+  for (const repo of repositories) {
+    const option = document.createElement("option");
+    option.value = repo.full_name;
+    option.textContent = repo.full_name;
+    select.appendChild(option);
+  }
+
+  if (previous && repositories.some((repo) => repo.full_name === previous)) {
+    select.value = previous;
+  }
+}
+
+function applyRepositoryDefaults(fullName) {
+  const repo = githubRepositories.find((item) => item.full_name === fullName);
+  if (repo?.default_branch && !jobBaseBranchInput.value.trim()) {
+    jobBaseBranchInput.value = repo.default_branch;
+  }
+}
+
+async function refreshCodeJobs() {
+  if (!jobsList) return;
+  jobsList.textContent = "Loading jobs...";
+  try {
+    const payload = await apiJsonAny(["/agent/jobs", "/code-jobs"]);
+    codeJobs = normalizeCodeJobs(payload);
+    if (selectedCodeJobId && !codeJobs.some((job) => job.id === selectedCodeJobId)) {
+      selectedCodeJobId = null;
+    }
+    renderCodeJobs();
+  } catch (err) {
+    codeJobs = [];
+    selectedCodeJobId = null;
+    renderCodeJobs(`Code Jobs unavailable: ${err.message}`);
+  }
+}
+
+function normalizeCodeJobs(payload) {
+  const items = Array.isArray(payload)
+    ? payload
+    : payload.jobs || payload.items || payload.data || payload.results || [];
+  return items.map(normalizeCodeJob).filter((job) => job.id);
+}
+
+function normalizeCodeJob(job) {
+  const id = String(job.id ?? job.job_id ?? job.jobId ?? job.name ?? "");
+  const instructions = job.instructions || job.prompt || job.description || "";
+  const repository = repositoryLabel(
+    job.repository ||
+      job.repo ||
+      job.repo_full_name ||
+      job.github_repository ||
+      job.githubRepository ||
+      ""
+  );
+  const result = job.result || {};
+  return {
+    id,
+    title: job.title || job.name || firstLine(instructions) || `Job ${id}`,
+    status: String(job.status || job.state || job.phase || "unknown").toLowerCase(),
+    repository,
+    base_branch: job.base_branch || job.baseBranch || "",
+    work_branch:
+      job.work_branch ||
+      job.target_branch ||
+      job.targetBranch ||
+      job.branch ||
+      job.head_branch ||
+      job.headBranch ||
+      "",
+    created_at: job.created_at || job.createdAt || job.created || "",
+    updated_at: job.updated_at || job.updatedAt || job.finished_at || job.finishedAt || "",
+    pull_request_url:
+      job.pull_request_url ||
+      job.pr_url ||
+      job.pullRequestUrl ||
+      job.pull_request?.html_url ||
+      result.pull_request_url ||
+      result.pr_url ||
+      "",
+    branch_url: job.branch_url || job.branchUrl || "",
+    repo_url: job.repo_url || job.repository_url || job.repositoryUrl || repositoryUrl(repository),
+    summary: job.summary || job.status_detail || job.message || result.summary || "",
+    logs: job.logs || job.log || job.output || job.events || "",
+    raw: job,
+  };
+}
+
+function repositoryLabel(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (value.full_name) return value.full_name;
+  if (value.fullName) return value.fullName;
+  if (value.owner && value.name) return `${value.owner}/${value.name}`;
+  if (value.repository_owner && value.repository_name) {
+    return `${value.repository_owner}/${value.repository_name}`;
+  }
+  return "";
+}
+
+function repositoryUrl(fullName) {
+  if (!fullName || !/^[^/\s]+\/[^/\s]+$/.test(fullName)) return "";
+  return `https://github.com/${fullName}`;
+}
+
+function renderCodeJobs(errorText) {
+  jobsList.replaceChildren();
+  const jobWord = codeJobs.length === 1 ? "job" : "jobs";
+  jobsCountPill.textContent = `${codeJobs.length} ${jobWord}`;
+
+  if (errorText) {
+    jobsList.textContent = errorText;
+    renderJobDetail(null);
+    return;
+  }
+
+  if (!codeJobs.length) {
+    jobsList.textContent = "No code jobs yet.";
+    renderJobDetail(null);
+    return;
+  }
+
+  for (const job of codeJobs) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "job-row";
+    row.classList.toggle("active", job.id === selectedCodeJobId);
+    row.onclick = () => selectCodeJob(job.id);
+
+    const main = document.createElement("span");
+    main.className = "job-row-main";
+
+    const title = document.createElement("span");
+    title.className = "job-row-title";
+    title.textContent = job.title;
+
+    const subtitle = document.createElement("span");
+    subtitle.className = "job-row-subtitle";
+    subtitle.textContent = [job.repository, job.work_branch, formatDateTime(job.updated_at || job.created_at)]
+      .filter(Boolean)
+      .join(" - ");
+
+    const status = document.createElement("span");
+    status.className = `job-status ${job.status}`;
+    status.textContent = job.status;
+
+    main.append(title, subtitle);
+    row.append(main, status);
+    jobsList.appendChild(row);
+  }
+
+  if (selectedCodeJobId) {
+    renderJobDetail(codeJobs.find((job) => job.id === selectedCodeJobId) || null);
+  } else {
+    renderJobDetail(null);
+  }
+}
+
+async function selectCodeJob(id) {
+  selectedCodeJobId = id;
+  const localJob = codeJobs.find((job) => job.id === id) || null;
+  renderCodeJobs();
+  renderJobDetail(localJob, { loading: true });
+
+  try {
+    const detail = normalizeCodeJob(
+      await apiJsonAny([
+        `/agent/jobs/${encodeURIComponent(id)}`,
+        `/code-jobs/${encodeURIComponent(id)}`,
+      ])
+    );
+    codeJobs = codeJobs.map((job) => (job.id === id ? detail : job));
+    renderCodeJobs();
+    renderJobDetail(detail);
+  } catch (err) {
+    renderJobDetail(localJob, { error: `Detail refresh failed: ${err.message}` });
+  }
+}
+
+function renderJobDetail(job, { loading = false, error = "" } = {}) {
+  jobDetail.replaceChildren();
+  if (!job) {
+    jobDetail.textContent = "Select a job to inspect status, logs, and links.";
+    return;
+  }
+
+  const title = document.createElement("h3");
+  title.textContent = job.title;
+  jobDetail.appendChild(title);
+
+  if (loading || error) {
+    const note = document.createElement("p");
+    note.className = error ? "form-status error" : "form-status";
+    note.textContent = error || "Loading latest detail...";
+    jobDetail.appendChild(note);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "job-detail-grid";
+  appendJobMeta(grid, "Status", job.status);
+  appendJobMeta(grid, "Repository", job.repository || "unknown");
+  appendJobMeta(grid, "Work branch", job.work_branch || "not set");
+  appendJobMeta(grid, "Updated", formatDateTime(job.updated_at || job.created_at) || "unknown");
+  jobDetail.appendChild(grid);
+
+  if (job.summary) {
+    const summary = document.createElement("p");
+    summary.textContent = job.summary;
+    jobDetail.appendChild(summary);
+  }
+
+  const links = renderJobLinks(job);
+  if (links.children.length) jobDetail.appendChild(links);
+
+  const log = document.createElement("pre");
+  log.className = "job-log";
+  log.textContent = jobLogText(job);
+  jobDetail.appendChild(log);
+}
+
+function appendJobMeta(parent, label, value) {
+  const item = document.createElement("div");
+  item.className = "job-meta";
+  const strong = document.createElement("strong");
+  strong.textContent = label;
+  const span = document.createElement("span");
+  span.textContent = value || "unknown";
+  item.append(strong, span);
+  parent.appendChild(item);
+}
+
+function renderJobLinks(job) {
+  const links = document.createElement("div");
+  links.className = "job-links";
+  appendJobLink(links, "Repository", job.repo_url);
+  appendJobLink(links, "Branch", job.branch_url);
+  appendJobLink(links, "Pull request", job.pull_request_url);
+  return links;
+}
+
+function appendJobLink(parent, label, href) {
+  if (!href) return;
+  const link = document.createElement("a");
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = label;
+  parent.appendChild(link);
+}
+
+function jobLogText(job) {
+  const logs = job.logs;
+  if (!logs) return "No logs available yet.";
+  if (Array.isArray(logs)) return logs.map(formatLogEntry).join("\n");
+  if (typeof logs === "object") return JSON.stringify(logs, null, 2);
+  return String(logs);
+}
+
+function formatLogEntry(entry) {
+  if (typeof entry === "string") return entry;
+  const time = entry.time || entry.timestamp || entry.created_at || "";
+  const level = entry.level || entry.status || "";
+  const message = entry.message || entry.text || entry.detail || JSON.stringify(entry);
+  return [time, level, message].filter(Boolean).join(" ");
+}
+
+async function createCodeJob(e) {
+  e.preventDefault();
+  const title = jobTitleInput.value.trim();
+  const selectedRepo = jobRepoSelect.value.trim();
+  const manualRepo = jobRepoUrlInput.value.trim();
+  const repository = selectedRepo || manualRepo;
+  const instructions = jobPromptInput.value.trim();
+  const repoParts = parseRepository(repository);
+
+  if (!repository) {
+    showJobFormStatus("Choose a repository or enter one manually.", "error");
+    return;
+  }
+  if (!repoParts) {
+    showJobFormStatus("Use a GitHub repository in owner/repo or GitHub URL format.", "error");
+    return;
+  }
+  if (!instructions) {
+    showJobFormStatus("Add instructions before starting a job.", "error");
+    return;
+  }
+  if (jobDispatch.checked && !githubStatus?.connected) {
+    showJobFormStatus("Sign in with GitHub before dispatching a code job.", "error");
+    return;
+  }
+
+  const body = {
+    title,
+    prompt: instructions,
+    repository_owner: repoParts.owner,
+    repository_name: repoParts.name,
+    base_branch: jobBaseBranchInput.value.trim() || "main",
+    target_branch: jobWorkBranchInput.value.trim() || null,
+    dispatch: jobDispatch.checked,
+    metadata: {
+      mode: jobModeSelect.value,
+      run_tests: jobRunTests.checked,
+      open_pull_request: jobOpenPr.checked,
+      repository: repoParts.fullName,
+    },
+  };
+
+  jobSubmitBtn.disabled = true;
+  showJobFormStatus("Starting code job...", "");
+  try {
+    const created = await apiJsonAny(["/agent/jobs", "/code-jobs"], {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const job = normalizeCodeJob(created.job || created);
+    selectedCodeJobId = job.id || selectedCodeJobId;
+    showJobFormStatus("Code job started.", "success");
+    codeJobForm.reset();
+    jobBaseBranchInput.value = "main";
+    jobDispatch.checked = true;
+    jobRunTests.checked = true;
+    jobOpenPr.checked = true;
+    await refreshCodeJobs();
+    if (job.id) selectCodeJob(job.id);
+  } catch (err) {
+    showJobFormStatus(`Failed to start job: ${err.message}`, "error");
+  } finally {
+    jobSubmitBtn.disabled = false;
+  }
+}
+
+function showJobFormStatus(message, tone) {
+  jobFormStatus.textContent = message;
+  jobFormStatus.classList.remove("hidden", "error", "success");
+  if (tone) jobFormStatus.classList.add(tone);
+}
+
+function parseRepository(value) {
+  const clean = String(value || "")
+    .trim()
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/^git@github\.com:/i, "")
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/g, "");
+  const [owner, name] = clean.split("/");
+  if (!owner || !name) return null;
+  return { owner, name, fullName: `${owner}/${name}` };
+}
+
+function firstLine(text) {
+  return String(text || "").split("\n").find((line) => line.trim())?.trim();
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 /* ---------- Settings modal ---------- */
 
