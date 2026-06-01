@@ -82,6 +82,7 @@ test("nginx API proxy does not capture health-status static asset", () => {
 
   const apiRoute = new RegExp(`^/(${route[1]})(/|$)`);
   assert.equal(apiRoute.test("/health"), true);
+  assert.equal(apiRoute.test("/research/status"), true);
   assert.equal(apiRoute.test("/health-status.js"), false);
 });
 
