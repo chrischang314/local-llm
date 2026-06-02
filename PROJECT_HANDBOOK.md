@@ -69,12 +69,17 @@ controller loop before opening Kubernetes logs.
 
 ## Authentication
 
-The app uses simple username/password login for a trusted LAN. The browser keeps
-the bearer token in `localStorage` so the user remains signed in across tab
-closes. The backend signs tokens with `JWT_SECRET` when configured; otherwise it
-stores a generated signing key under the persistent app data directory
-(`/app/data/jwt_secret` in containers). That generated key is runtime state and
-must stay out of git.
+The app uses simple username/password login for a trusted LAN, backed by the
+shared projects.lan server-side SSO database. `SHARED_AUTH_DB` points at the
+shared SQLite file containing users and `auth_sessions`. Login/register set the
+`projects_lan_session` cookie as `HttpOnly`, `SameSite=Lax`, and `Path=/`; the
+browser does not keep auth authority in `localStorage`.
+
+Local LLM still keeps app-local user rows for conversation and GitHub job
+ownership. On each authenticated request, the shared cookie identifies the
+shared user, and the backend ensures a matching local ownership row. Existing
+legacy local users can seed the shared auth DB on first successful login with
+their old password.
 
 ## Conversation Portability
 

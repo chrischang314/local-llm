@@ -76,6 +76,10 @@ spec:
               value: mojeek
             - name: WEB_RESEARCH_FETCH_PAGES
               value: "false"
+            - name: SHARED_AUTH_DB
+              value: /shared-auth/auth.db
+            - name: CORS_ORIGINS
+              value: http://localllm.lan,http://projects.lan
             - name: AGENT_RUNNER_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -88,6 +92,8 @@ spec:
               readOnly: true
             - name: chat-data
               mountPath: /app/data
+            - name: shared-auth
+              mountPath: /shared-auth
           readinessProbe:
             httpGet:
               path: /health
@@ -103,6 +109,9 @@ spec:
         - name: chat-data
           persistentVolumeClaim:
             claimName: local-llm-chat-data
+        - name: shared-auth
+          persistentVolumeClaim:
+            claimName: shared-auth-nfs
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

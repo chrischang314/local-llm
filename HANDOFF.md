@@ -27,9 +27,10 @@
   Keep `k8s/local-llm/backend.yaml` on `strategy.type: Recreate`, and keep the
   `/health` readiness timeout above the Kubernetes 1-second default because the
   endpoint summarizes external worker state.
-- Login tokens are stored in browser `localStorage`. The backend signs them
-  with `JWT_SECRET` when set, otherwise it generates and reuses
-  `/app/data/jwt_secret` on the persistent chat-data volume.
+- Login/register now use the shared projects.lan SSO contract. Users and
+  server-side sessions live in `SHARED_AUTH_DB`, and browsers authenticate with
+  the HttpOnly `projects_lan_session` cookie (`SameSite=Lax`, `Path=/`).
+  `localStorage` may only keep display state; it is not auth authority.
 - CHRIS-PC-1 now runs the native Windows Ollama worker, not the Docker Desktop
   worker. The launcher task is `Local LLM Native Ollama CHRIS-PC-1`, and the
   watcher task is `Local LLM CHRIS-PC-1 Native Worker Controller`.
@@ -76,8 +77,8 @@
 ## Safe Continuation Notes
 
 - Do not commit kubeconfigs, service-account tokens, SSH keys, Docker auth
-  files, anything under `.docker-worker/`, or any generated `data/jwt_secret`
-  file.
+  files, anything under `.docker-worker/`, or generated runtime secret files
+  such as `data/secret_store_key` or legacy `data/jwt_secret`.
 - Do not commit `node_modules/`. If frontend runtime packages change, use
   `npm install` and `npm run vendor:frontend`, then review the refreshed
   `frontend/vendor/` files and `package-lock.json`.
@@ -116,9 +117,11 @@
 - `GITHUB_ALLOWED_INSTALLATION_IDS` is required only for the legacy GitHub App
   path. OAuth-connected users do not need GitHub App env vars or the install-id
   allowlist.
-- If an existing browser token was signed before this persistence change, the
-  user may need to sign in once after deployment. New tokens should survive tab
-  closes and backend restarts until logout or token expiry.
+- Existing JWT/localStorage browser sessions will need to sign in again.
+  Existing local users can still log in with their old password once; the
+  backend verifies the legacy bcrypt hash and seeds the shared auth DB.
+  GitHub secret encryption now uses `SECRET_STORE_KEY`/`SECRET_STORE_KEY_FILE`;
+  old persisted `jwt_secret` files are copied as a compatibility key only.
 - Agent runner callbacks use `http://backend.default.svc.cluster.local:8000` in
   this cluster because the local-llm backend Service is named `backend`.
 - If CHRIS-PC-1 appears offline, first check the native scheduled tasks and

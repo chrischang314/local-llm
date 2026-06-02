@@ -4,5 +4,4 @@ httpx
 sqlalchemy
 aiosqlite
 bcrypt
-pyjwt
 cryptography

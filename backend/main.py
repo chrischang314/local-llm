@@ -4,9 +4,11 @@ Routes overview
 ---------------
 Auth (no token required):
   POST /auth/register           — create a user with username + password
-  POST /auth/login              — verify password, return JWT bearer token
+  POST /auth/login              — verify password, set shared session cookie
+  POST /auth/logout             — revoke shared session cookie
+  GET  /auth/me                 — return current shared user
 
-Authenticated (Authorization: Bearer <jwt>):
+Authenticated (projects_lan_session cookie):
   GET    /health                — backend + ollama health (no auth required)
   GET    /conversations         — list current user's conversations
   POST   /conversations         — create an empty conversation (with settings)
@@ -37,20 +39,31 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from auth import (
-    create_token,
+    InvalidCredentialsError,
+    SESSION_COOKIE_NAME,
+    UserAlreadyExistsError,
+    authenticate_user,
+    clear_session_cookie,
+    create_session,
     current_user,
     current_user_id,
-    hash_password,
-    verify_password,
+    ensure_local_user,
+    init_shared_auth,
+    migrate_legacy_user,
+    public_user,
+    register_user,
+    revoke_session,
+    set_session_cookie,
+    verify_legacy_password,
 )
 from database import AsyncSessionLocal, Base, engine, get_db, migrate_schema
 from agent_routes import router as agent_router
@@ -68,11 +81,24 @@ K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 K8S_NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 WORKER_SWITCH_LABEL = "app.kubernetes.io/component=external-worker-switch"
 WORKER_SYNC_STALE_SECONDS = int(os.getenv("WORKER_SYNC_STALE_SECONDS", "300"))
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:8000,http://127.0.0.1:8000,"
+    "http://localhost:12000,http://127.0.0.1:12000,"
+    "http://localllm.lan,http://projects.lan"
+)
+
+
+def _csv_env(name: str, default: str) -> list[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pathlib.Path("data").mkdir(exist_ok=True)
+    init_shared_auth()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     # Ensure any columns added since the original release exist on disk.
@@ -84,7 +110,8 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_csv_env("CORS_ORIGINS", DEFAULT_CORS_ORIGINS),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[
@@ -219,58 +246,97 @@ def _insert_research_context(messages: list[dict], research_context: str) -> lis
 # ---------------------------------------------------------------------------
 
 
-def _validate_credentials(username: str, password: str) -> tuple[str, str]:
-    """Strip + sanity-check a username/password pair; raise 400 on issues."""
-    username = username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="Username cannot be empty")
-    if len(username) > 64:
-        raise HTTPException(status_code=400, detail="Username too long (max 64)")
-    if not password or len(password) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
-    return username, password
+async def _legacy_local_user(username: str, db: AsyncSession) -> User | None:
+    clean = " ".join(username.strip().split())
+    if not clean:
+        return None
+    return (
+        await db.execute(select(User).where(User.username == clean))
+    ).scalar_one_or_none()
+
+
+async def _authenticate_shared_or_legacy(
+    username: str,
+    password: str,
+    db: AsyncSession,
+) -> dict:
+    try:
+        return authenticate_user(username, password)
+    except InvalidCredentialsError as shared_exc:
+        local_user = await _legacy_local_user(username, db)
+        if local_user and verify_legacy_password(password, local_user.password_hash):
+            try:
+                return migrate_legacy_user(local_user.username)
+            except UserAlreadyExistsError:
+                pass
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=401, detail=str(shared_exc)) from shared_exc
+    except ValueError as exc:
+        local_user = await _legacy_local_user(username, db)
+        if local_user and verify_legacy_password(password, local_user.password_hash):
+            try:
+                return migrate_legacy_user(local_user.username)
+            except UserAlreadyExistsError:
+                pass
+            except ValueError as migration_exc:
+                raise HTTPException(status_code=400, detail=str(migration_exc)) from migration_exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _issue_session(
+    shared_user: dict,
+    response: Response,
+    db: AsyncSession,
+) -> dict:
+    await ensure_local_user(shared_user, db)
+    set_session_cookie(response, create_session(int(shared_user["id"])))
+    return public_user(shared_user)
 
 
 @app.post("/auth/register")
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Create a new user. Returns a bearer token on success."""
-    username, password = _validate_credentials(request.username, request.password)
-
-    existing = (
-        await db.execute(select(User).where(User.username == username))
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Username already taken")
-
-    user = User(username=username, password_hash=hash_password(password))
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-
-    return {
-        "id": user.id,
-        "username": user.username,
-        "token": create_token(user.id, user.username),
-    }
+async def register(
+    request: RegisterRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a shared user and start a server-side browser session."""
+    try:
+        shared_user = register_user(request.username, request.password)
+    except UserAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await _issue_session(shared_user, response, db)
 
 
 @app.post("/auth/login")
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Verify a username + password pair and return a bearer token."""
-    username, password = _validate_credentials(request.username, request.password)
-    user = (
-        await db.execute(select(User).where(User.username == username))
-    ).scalar_one_or_none()
+async def login(
+    request: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify a username/password pair and start a server-side session."""
+    shared_user = await _authenticate_shared_or_legacy(
+        request.username,
+        request.password,
+        db,
+    )
+    return await _issue_session(shared_user, response, db)
 
-    if not user or not verify_password(password, user.password_hash or ""):
-        # Same message for both branches to avoid user enumeration.
-        raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    return {
-        "id": user.id,
-        "username": user.username,
-        "token": create_token(user.id, user.username),
-    }
+@app.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    """Revoke the current shared session and clear the browser cookie."""
+    revoke_session(request.cookies.get(SESSION_COOKIE_NAME))
+    clear_session_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+async def me(user: dict = Depends(current_user)):
+    """Return the current shared authenticated user."""
+    return public_user(user)
 
 
 # ---------------------------------------------------------------------------

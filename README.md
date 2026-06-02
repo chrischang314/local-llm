@@ -231,12 +231,20 @@ run `scripts/agent-runner-canary.ps1` when validating it.
 
 ## Login Persistence
 
-The browser stores the active login token in `localStorage`, so closing and
-reopening a tab should keep the user signed in until they click log out or the
-30-day token expires.
+Local LLM uses the shared projects.lan server-side SSO contract. Login and
+register create or verify users in the SQLite database pointed at by
+`SHARED_AUTH_DB`, then set the `projects_lan_session` cookie with `HttpOnly`,
+`SameSite=Lax`, and `Path=/`. The browser does not store auth tokens in
+`localStorage`; it may only cache display-only user state.
 
-Backend restarts keep accepting existing tokens because the JWT signing key is
-persisted at `/app/data/jwt_secret` by default. `JWT_SECRET` still takes
-priority when set, and `JWT_SECRET_FILE` can point the generated key somewhere
-else. Do not delete the chat data volume if you want existing sessions to stay
-valid across redeploys.
+Set `SHARED_AUTH_DB` to the same SQLite file used by the other local apps. For
+Docker Compose this repo mounts `/shared-auth/auth.db`; without an override,
+local non-container runs default to `~/.local-webapps/auth.db`. Set
+`AUTH_COOKIE_DOMAIN` or `PROJECTS_LAN_COOKIE_DOMAIN` only after browser testing
+proves the parent domain is accepted. The first LAN SSO rollout relies on the
+host-scoped cookie at `projects.lan` through the launchpad proxy.
+
+Integration secrets use `SECRET_STORE_KEY` or `SECRET_STORE_KEY_FILE`
+(`LOCAL_LLM_DATA_DIR/secret_store_key` by default). Older persisted
+`jwt_secret` files are copied as a compatibility key for existing encrypted
+GitHub settings, but JWTs are no longer login/session authority.

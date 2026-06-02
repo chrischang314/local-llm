@@ -2,8 +2,8 @@
 /*
  * Local LLM Chat — frontend
  *
- * Talks to the FastAPI backend. JWT bearer auth, attached to every
- * authenticated request. Conversation settings (model, system prompt,
+ * Talks to the FastAPI backend. The shared HttpOnly session cookie is
+ * attached by the browser. Conversation settings (model, system prompt,
  * sampling params) live on the conversation row; the settings modal edits
  * them with PATCH /conversations/{id}.
  *
@@ -25,12 +25,12 @@ const API =
 // Default model context window if Ollama doesn't report one. Used purely
 // for the "X / Y tokens" indicator; doesn't affect what's sent to Ollama.
 const DEFAULT_CONTEXT_WINDOW = 8192;
+const AUTH_DISPLAY_KEY = "authDisplay";
 
 marked.setOptions({ breaks: true, gfm: true });
 
 /* ---------- App state ---------- */
 
-let authToken = null;
 let currentUser = null;
 let currentConversation = null; // full row from backend
 let currentConversationId = null;
@@ -133,17 +133,17 @@ function refreshIcons() {
 
 /* ---------- HTTP helpers ---------- */
 
-function authHeaders(extra = {}) {
-  return authToken ? { Authorization: `Bearer ${authToken}`, ...extra } : { ...extra };
+function requestHeaders(extra = {}) {
+  return { ...extra };
 }
 
 async function apiFetch(path, opts = {}) {
-  const headers = { ...(opts.headers || {}), ...authHeaders() };
+  const headers = { ...(opts.headers || {}), ...requestHeaders() };
   if (opts.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
-  const res = await fetch(`${API}${path}`, { ...opts, headers });
-  if (res.status === 401 && authToken) {
-    // Token expired or invalid — drop creds and bounce to login.
-    handleLogout();
+  const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: "include" });
+  if (res.status === 401 && currentUser) {
+    // Session expired or invalid; drop display state and bounce to login.
+    clearLocalSession();
     throw new Error("Session expired, please sign in again");
   }
   return res;
@@ -159,19 +159,36 @@ async function apiJson(path, opts = {}) {
   return res.json();
 }
 
+function cacheDisplayUser(user) {
+  localStorage.setItem(AUTH_DISPLAY_KEY, JSON.stringify({
+    id: user.id,
+    username: user.username,
+  }));
+}
+
+function readCachedDisplayUser() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AUTH_DISPLAY_KEY) || "null");
+    return parsed?.username ? { id: parsed.id, username: parsed.username } : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ---------- Init ---------- */
 
 async function init() {
-  const stored = localStorage.getItem("auth");
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored);
-      authToken = parsed.token;
-      currentUser = { id: parsed.id, username: parsed.username };
-      await completeGithubInstallFromUrl();
-      await loadApp();
-      return;
-    } catch {}
+  localStorage.removeItem("auth");
+  currentUser = readCachedDisplayUser();
+  try {
+    const data = await apiJson("/auth/me");
+    currentUser = { id: data.id, username: data.username };
+    cacheDisplayUser(currentUser);
+    await completeGithubInstallFromUrl();
+    await loadApp();
+    return;
+  } catch {
+    currentUser = null;
   }
   showLogin();
 }
@@ -229,13 +246,14 @@ loginForm.addEventListener("submit", async (e) => {
     const res = await fetch(`${API}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ username, password }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || "Login failed");
     const data = await res.json();
-    authToken = data.token;
     currentUser = { id: data.id, username: data.username };
-    localStorage.setItem("auth", JSON.stringify(data));
+    localStorage.removeItem("auth");
+    cacheDisplayUser(currentUser);
     loginError.classList.add("hidden");
     passwordInput.value = "";
     await loadApp();
@@ -245,9 +263,8 @@ loginForm.addEventListener("submit", async (e) => {
   }
 });
 
-function handleLogout() {
+function clearLocalSession() {
   stopAgentEventStream();
-  authToken = null;
   currentUser = null;
   currentConversation = null;
   currentConversationId = null;
@@ -255,13 +272,24 @@ function handleLogout() {
   conversations = [];
   webResearchEnabled = false;
   localStorage.removeItem("auth");
+  localStorage.removeItem(AUTH_DISPLAY_KEY);
   // Reset to login mode (user is more likely returning than registering).
   if (loginMode !== "login") toggleMode.click();
   passwordInput.value = "";
   showLogin();
 }
 
-logoutBtn.addEventListener("click", handleLogout);
+async function handleLogout() {
+  try {
+    await fetch(`${API}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {}
+  clearLocalSession();
+}
+
+logoutBtn.addEventListener("click", () => handleLogout());
 
 /* ---------- Health ---------- */
 
@@ -631,7 +659,8 @@ async function startAgentEventStream(jobId) {
   agentEventsAbort = new AbortController();
   try {
     const res = await fetch(`${API}/agent/jobs/${jobId}/events`, {
-      headers: authHeaders(),
+      headers: requestHeaders(),
+      credentials: "include",
       signal: agentEventsAbort.signal,
     });
     if (!res.ok) throw new Error(`Event stream failed (${res.status})`);
@@ -1421,7 +1450,8 @@ async function runChatStream({ regenerate }) {
 
     const res = await fetch(`${API}/chat`, {
       method: "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
+      headers: requestHeaders({ "Content-Type": "application/json" }),
+      credentials: "include",
       body: JSON.stringify(body),
       signal: streamAbortController.signal,
     });
