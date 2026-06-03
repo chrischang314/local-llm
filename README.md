@@ -123,7 +123,8 @@ worker summary:
 The chat sidebar uses the same endpoint so the at-a-glance status shows both
 model count and the worker readiness severity/summary. If Ollama is up but
 enabled worker capacity is degraded, the sidebar switches to a warning state
-instead of looking fully healthy.
+instead of looking fully healthy. Long worker-capacity summaries wrap inside the
+sidebar footer so the bottom-left controls stay contained.
 
 When an optional Windows worker switch is scaled to `0`, `/health` treats that
 worker as intentionally disabled. Disabled optional workers are still counted in

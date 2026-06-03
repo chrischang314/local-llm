@@ -7,9 +7,10 @@
 - `/health` now includes a `workers` summary with total, enabled, available,
   unavailable, busy, loaded model counts, a compact readiness state, and a
   public-safe readiness issue count. The frontend sidebar renders this as model
-  count plus worker readiness severity and summary. It overlays Kubernetes
-  optional-worker switches, so CHRIS-PC-1/CHRIS-PC-2 scaled to `0` count as
-  intentionally disabled rather than degraded capacity.
+  count plus worker readiness severity and summary, with long warnings wrapped
+  inside the footer so the bottom-left controls stay contained. It overlays
+  Kubernetes optional-worker switches, so CHRIS-PC-1/CHRIS-PC-2 scaled to `0`
+  count as intentionally disabled rather than degraded capacity.
 - The authenticated `/workers` response now includes a readiness summary with
   actionable issue rows for unavailable enabled workers, switch sync mismatches,
   stale controller heartbeats, and worker-control access failures. Settings >
@@ -183,7 +184,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\agent-runner-canary.ps1
   `tests/test_agent_executor_client.py`.
 - For a live smoke check, call `http://localllm.lan/health` and confirm the
   `workers` object is present, then open the chat UI and inspect the sidebar
-  health label.
+  health label with a long/degraded worker-capacity summary.
 - Before setting `AGENT_JOBS_ENABLED=true`, run sandbox canaries for a successful
   command, a failing command, timeout behavior, blocked kube API access, blocked
   app-secret access, and blocked Docker socket access.
