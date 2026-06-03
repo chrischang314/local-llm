@@ -31,6 +31,41 @@ roleRef:
   kind: Role
   name: local-llm-backend-worker-control
 ---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-llm-shared-auth-nfs
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 1Gi
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: shared-auth-nfs
+    namespace: local-llm
+  nfs:
+    path: /volume1/k8s/default-shared-auth-nfs-pvc-71676129-75e8-40eb-a36b-cb0569f5c55e
+    server: 192.168.4.33
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: synology-nfs
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-auth-nfs
+  namespace: local-llm
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: synology-nfs
+  volumeName: local-llm-shared-auth-nfs
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

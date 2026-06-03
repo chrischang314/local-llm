@@ -247,6 +247,11 @@ local non-container runs default to `~/.local-webapps/auth.db`. Set
 proves the parent domain is accepted. The first LAN SSO rollout relies on the
 host-scoped cookie at `projects.lan` through the launchpad proxy.
 
+The `local-llm` Kubernetes namespace uses a static `local-llm-shared-auth-nfs`
+PV/PVC binding for `shared-auth-nfs`. It intentionally points at the existing
+shared-auth NFS path used by the default deployment so both LAN paths read the
+same users and server-side sessions.
+
 Integration secrets use `SECRET_STORE_KEY` or `SECRET_STORE_KEY_FILE`
 (`LOCAL_LLM_DATA_DIR/secret_store_key` by default). Older persisted
 `jwt_secret` files are copied as a compatibility key for existing encrypted

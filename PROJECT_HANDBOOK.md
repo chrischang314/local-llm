@@ -75,6 +75,10 @@ shared SQLite file containing users and `auth_sessions`. Login/register set the
 `projects_lan_session` cookie as `HttpOnly`, `SameSite=Lax`, and `Path=/`; the
 browser does not keep auth authority in `localStorage`.
 
+The `local-llm` namespace deployment binds `shared-auth-nfs` through a static
+PV to the same NFS auth DB used by the default deployment. A separate dynamic
+claim would create a different SSO database and break cross-app sessions.
+
 Local LLM still keeps app-local user rows for conversation and GitHub job
 ownership. On each authenticated request, the shared cookie identifies the
 shared user, and the backend ensures a matching local ownership row. Existing

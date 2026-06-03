@@ -32,6 +32,9 @@
   server-side sessions live in `SHARED_AUTH_DB`, and browsers authenticate with
   the HttpOnly `projects_lan_session` cookie (`SameSite=Lax`, `Path=/`).
   `localStorage` may only keep display state; it is not auth authority.
+  The `local-llm` namespace backend binds `shared-auth-nfs` through the static
+  `local-llm-shared-auth-nfs` PV so it uses the same NFS auth DB as the default
+  deployment; do not replace it with a dynamically provisioned empty claim.
 - CHRIS-PC-1 now runs the native Windows Ollama worker, not the Docker Desktop
   worker. The launcher task is `Local LLM Native Ollama CHRIS-PC-1`, and the
   watcher task is `Local LLM CHRIS-PC-1 Native Worker Controller`.
