@@ -77,7 +77,8 @@ test("nginx API proxy does not capture health-status static asset", () => {
     new URL("../frontend/nginx.conf", import.meta.url),
     "utf8",
   );
-  const route = nginxConfig.match(/location ~ \^\/\(([^)]+)\)\(\/\|\$\)/);
+  const route = [...nginxConfig.matchAll(/location ~ \^\/\(([^)]+)\)\(\/\|\$\)/g)]
+    .find((match) => match[1].includes("auth"));
   assert.ok(route, "API proxy route should require a slash or end after the prefix");
 
   const apiRoute = new RegExp(`^/(${route[1]})(/|$)`);

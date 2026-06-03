@@ -54,6 +54,12 @@ class ChatOnlyBoundaryTests(unittest.TestCase):
             self.assertNotIn(needle, app_js)
             self.assertNotIn(needle, index_html)
 
+    def test_frontend_nginx_blocks_removed_api_prefixes(self):
+        nginx_conf = (REPO_ROOT / "frontend/nginx.conf").read_text(encoding="utf-8")
+
+        self.assertIn("location ~ ^/(agent|github)(/|$)", nginx_conf)
+        self.assertNotIn("github|agent|v1", nginx_conf)
+
 
 class RemovedRouteSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_removed_code_feature_endpoints_return_404(self):
