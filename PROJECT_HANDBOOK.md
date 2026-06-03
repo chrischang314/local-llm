@@ -97,6 +97,9 @@ can leave the LAN. The backend fetches public search results through
 `backend/research_client.py`, rejects private/link-local/reserved result targets,
 and injects a dated system context before the user prompt. Source URLs are
 appended to the model answer so the saved conversation remains easy to audit.
+Optional page-body excerpt fetching is deliberately narrower than citation
+collection: hostname results stay as sources, but excerpt fetches are limited to
+literal public IP URLs to avoid DNS-rebinding and internal-network SSRF paths.
 
 Keep research providers no-secret by default. If a provider later needs API
 keys, tokens, cookies, or browser state, store them outside git and expose only

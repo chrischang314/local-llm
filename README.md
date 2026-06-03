@@ -96,7 +96,9 @@ Useful environment variables:
 - `WEB_RESEARCH_TIMEOUT_SECONDS`: network timeout per research request.
 - `WEB_RESEARCH_FETCH_PAGES`: set to `true` to fetch result page excerpts after
   private/link-local/reserved targets are rejected. Default is `false`; search
-  snippets and source URLs are still used.
+  snippets and source URLs are still used. For SSRF protection, page-body fetches
+  are limited to literal public IP URLs; normal hostname results are kept as
+  citations but are not fetched for excerpts.
 - `WEB_RESEARCH_MAX_CONTEXT_CHARS`: prompt budget for retrieved context.
 
 `GET /research/status` returns only non-secret feature status for the signed-in

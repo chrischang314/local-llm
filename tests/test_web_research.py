@@ -134,6 +134,32 @@ class WebResearchClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.sources[0].snippet, "Search snippet survives without page text.")
         self.assertEqual(result.sources[0].excerpt, "")
 
+    async def test_page_fetch_skips_hostname_results_to_prevent_dns_rebinding(self):
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "www.mojeek.com":
+                return httpx.Response(
+                    200,
+                    text="""
+                    <html><body>
+                      <a class="title" href="https://example.com/article">Result</a>
+                      <p class="s">Search snippet survives without page text.</p>
+                    </body></html>
+                    """,
+                    headers={"content-type": "text/html"},
+                )
+            raise AssertionError(f"unexpected page fetch to {request.url}")
+
+        result = await research_web(
+            "hostname result",
+            config=WebResearchConfig(max_results=1, timeout_seconds=2, fetch_pages=True),
+            transport=httpx.MockTransport(handler),
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.sources[0].url, "https://example.com/article")
+        self.assertEqual(result.sources[0].snippet, "Search snippet survives without page text.")
+        self.assertEqual(result.sources[0].excerpt, "")
+
     async def test_private_literal_ip_results_are_skipped(self):
         async def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.host, "www.mojeek.com")

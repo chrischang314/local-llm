@@ -10,7 +10,6 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
-import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
@@ -235,7 +234,7 @@ async def _fetch_excerpt(
 ) -> str:
     if not _is_safe_public_url(url):
         return ""
-    if not _hostname_resolves_public(url):
+    if not _url_uses_public_literal_address(url):
         return ""
     try:
         response = await client.get(
@@ -399,24 +398,14 @@ def _is_safe_public_url(url: str) -> bool:
     return _is_public_address(address)
 
 
-def _hostname_resolves_public(url: str) -> bool:
+def _url_uses_public_literal_address(url: str) -> bool:
     parsed = urlparse(url)
     if not parsed.hostname:
         return False
     try:
         address = ipaddress.ip_address(parsed.hostname)
     except ValueError:
-        try:
-            infos = socket.getaddrinfo(parsed.hostname, None, type=socket.SOCK_STREAM)
-        except socket.gaierror:
-            return False
-        addresses = {info[4][0] for info in infos if info and info[4]}
-        if not addresses:
-            return False
-        try:
-            return all(_is_public_address(ipaddress.ip_address(address)) for address in addresses)
-        except ValueError:
-            return False
+        return False
     return _is_public_address(address)
 
 

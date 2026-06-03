@@ -94,7 +94,9 @@
   exported browser storage if a provider beyond the no-key HTML search fetchers
   is added later. Keep tests on mocked transports. Result page fetching is off
   by default; if `WEB_RESEARCH_FETCH_PAGES=true` is enabled, preserve the
-  private-address and redirect safety tests.
+  private-address, redirect, and hostname/DNS-rebinding safety tests. The
+  fetcher keeps normal hostname results as citations, but page-body excerpt
+  fetches are restricted to literal public IP URLs.
 - `GITHUB_BYPASS_TOKEN` / `GITHUB_BYPASS_TOKEN_FILE` is a temporary live-test
   escape hatch for disposable repositories when no GitHub App exists. Do not use
   it as the normal authorization model and remove the Secret/env after testing.
