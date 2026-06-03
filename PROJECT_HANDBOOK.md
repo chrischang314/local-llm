@@ -124,10 +124,11 @@ non-secret status through `/research/status`.
 
 The LAN UI should not require public CDNs during normal page load. Browser
 libraries for Markdown rendering, HTML sanitization, syntax highlighting, and
-icons are pinned in `package-lock.json`, copied into `frontend/vendor/`, and
-served by the same nginx frontend image as the application HTML. This removes
-runtime drift from URLs such as `lucide@latest` and keeps the chat and docs
-pages usable when internet access is unavailable but the LAN is healthy.
+icons are pinned in `package-lock.json`, listed in
+`scripts/frontend-vendor-assets.json`, copied into `frontend/vendor/`, and served
+by the same nginx frontend image as the application HTML. This removes runtime
+drift from URLs such as `lucide@latest` and keeps the chat and docs pages usable
+when internet access is unavailable but the LAN is healthy.
 
 Assistant Markdown is rendered as sanitized HTML and then enhanced in
 `frontend/app.js` before it is shown in the chat. Keep the enhancement pass
@@ -135,8 +136,9 @@ responsible for viewport-sensitive markup, such as wrapping wide tables and
 normalizing media/link behavior, while CSS owns sizing and overflow rules.
 
 When changing a browser library version, update the pinned npm dependency,
-refresh `frontend/vendor/`, and run the static frontend test that checks both
-HTML pages for CDN references and missing vendored assets.
+update the vendor manifest, refresh `frontend/vendor/`, and run the static
+frontend test that checks both HTML pages for CDN references, package-pin drift,
+and missing vendored assets.
 
 ## Chat-Only Boundary
 

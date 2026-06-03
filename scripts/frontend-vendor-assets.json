@@ -1,0 +1,70 @@
+{
+  "htmlEntrypoints": [
+    "frontend/index.html",
+    "frontend/docs.html"
+  ],
+  "blockedRuntimeAssetPatterns": [
+    "https://cdn.jsdelivr.net",
+    "https://unpkg.com",
+    "https://cdnjs.cloudflare.com",
+    "lucide@latest"
+  ],
+  "assets": [
+    {
+      "name": "Marked",
+      "packageName": "marked",
+      "version": "4.3.0",
+      "source": "node_modules/marked/marked.min.js",
+      "destination": "frontend/vendor/marked/4.3.0/marked.min.js",
+      "runtimePath": "vendor/marked/4.3.0/marked.min.js",
+      "usedBy": [
+        "frontend/index.html"
+      ]
+    },
+    {
+      "name": "DOMPurify",
+      "packageName": "dompurify",
+      "version": "3.4.7",
+      "source": "node_modules/dompurify/dist/purify.min.js",
+      "destination": "frontend/vendor/dompurify/3.4.7/purify.min.js",
+      "runtimePath": "vendor/dompurify/3.4.7/purify.min.js",
+      "usedBy": [
+        "frontend/index.html"
+      ]
+    },
+    {
+      "name": "Highlight.js",
+      "packageName": "@highlightjs/cdn-assets",
+      "version": "11.10.0",
+      "source": "node_modules/@highlightjs/cdn-assets/highlight.min.js",
+      "destination": "frontend/vendor/highlight.js/11.10.0/highlight.min.js",
+      "runtimePath": "vendor/highlight.js/11.10.0/highlight.min.js",
+      "usedBy": [
+        "frontend/index.html"
+      ]
+    },
+    {
+      "name": "Highlight.js GitHub Dark CSS",
+      "packageName": "@highlightjs/cdn-assets",
+      "version": "11.10.0",
+      "source": "node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css",
+      "destination": "frontend/vendor/highlight.js/11.10.0/styles/github-dark.min.css",
+      "runtimePath": "vendor/highlight.js/11.10.0/styles/github-dark.min.css",
+      "usedBy": [
+        "frontend/index.html"
+      ]
+    },
+    {
+      "name": "Lucide",
+      "packageName": "lucide",
+      "version": "0.468.0",
+      "source": "node_modules/lucide/dist/umd/lucide.min.js",
+      "destination": "frontend/vendor/lucide/0.468.0/lucide.min.js",
+      "runtimePath": "vendor/lucide/0.468.0/lucide.min.js",
+      "usedBy": [
+        "frontend/index.html",
+        "frontend/docs.html"
+      ]
+    }
+  ]
+}
