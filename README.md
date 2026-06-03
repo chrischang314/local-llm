@@ -165,72 +165,18 @@ the saved assistant message, so reopening a conversation still shows which
 worker handled each reply and whether the model was already resident or loaded
 on demand.
 
-## Code Change Mode And GitHub Integration
+## Chat-Only Boundary
 
-The main workspace includes a gated Code mode for authenticated users. It can
-connect to GitHub from the website, list authorized repositories and branches,
-and queue agentic coding jobs that run inside isolated Kubernetes Jobs.
+Local LLM is scoped to local model chat, model selection, conversation storage,
+conversation export, optional web-research augmentation, and worker routing for
+chat inference. Coding automation, repository changes, desktop tasks, external
+app sign-in, browser automation, delegated execution, and command runners belong
+in the separate Local Agent project.
 
-The normal connection path is GitHub OAuth. Configure one service OAuth App in
-Settings > Integrations > GitHub service setup using the displayed callback URL
-(`http://localllm.lan/github/oauth/callback` on the LAN deployment). Local LLM
-stores that Client ID and Client Secret encrypted in SQLite. After that, every
-Local LLM user gets a normal **Sign in with GitHub** button: it redirects to
-github.com, the user authorizes there, and the callback stores that user's
-encrypted GitHub token for repository access. End users do not paste OAuth app
-keys.
-
-Live code execution is disabled by default. Enable it only after the sandbox
-namespace, NetworkPolicy enforcement, and canary tests pass:
-
-```powershell
-kubectl apply -f .\k8s\local-llm\agent-sandbox.yaml
-```
-
-Required backend environment variables for live execution:
-
-- `AGENT_SECRET_KEY`
-- `AGENT_JOBS_ENABLED=true` after sandbox validation
-
-The older GitHub App installation path remains supported for deployments that
-want installation tokens. That legacy path still uses `GITHUB_APP_ID`,
-`GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE`,
-and `GITHUB_ALLOWED_INSTALLATION_IDS`. OAuth-connected users do not need those
-GitHub App env vars.
-
-For a controlled live smoke test before a GitHub App exists, the backend also
-recognizes `GITHUB_BYPASS_TOKEN` or `GITHUB_BYPASS_TOKEN_FILE`. This treats a
-single Kubernetes Secret-backed GitHub token as the installation token source and
-should be temporary, LAN-only, and limited to disposable repositories. The normal
-production path remains the site-driven OAuth redirect flow above.
-
-The runner image is built from `agent-runner/` and published by GitHub Actions as
-`ghcr.io/<owner>/<repo>/agent-runner`. Each job gets a GitHub repository access
-token from the connected OAuth account or legacy GitHub App installation, clones
-the selected repository, creates an `agent/<job-id>` branch, then runs a bounded
-multi-agent quality loop:
-
-1. an implementation subagent drafts the change,
-2. a reviewer subagent checks correctness, scope, maintainability, and safety,
-3. a testing agent runs the configured test command,
-4. a revision subagent fixes reviewer or test failures, repeating up to three
-   review/test cycles.
-
-The model tool loop can read/search/write files, inspect diffs, and run bounded
-shell commands inside the isolated repository workspace. If no diff is present,
-the reviewer step runs the configured test command once to give the revision
-subagent concrete failure output. The runner requests a fresh installation token
-or OAuth repository token for push/PR operations only after the reviewer and testing gates are satisfied.
-If the branch is protected or the push diverges, the runner pushes the agent
-branch and creates a PR instead. If no test command is supplied, it must not
-update the base branch.
-
-`k8s/local-llm/agent-runner.yaml` also defines an optional internal HTTP runner
-service for bounded command execution. The shared `agent-runner` image defaults
-to the batch job runner used by Code mode; that Deployment overrides the command
-to run `uvicorn agent_runner.main:app` on port `8080`. Create the
-`local-llm-agent-runner-auth` Secret before applying that optional service and
-run `scripts/agent-runner-canary.ps1` when validating it.
+The model and worker controls remain only to manage chat inference capacity.
+They do not expose repository access, code execution, browser automation, or
+agent job orchestration. Model pull/delete and worker on/off routes require an
+operator identity through `LOCAL_LLM_ADMIN_USERS` or `LOCAL_LLM_ADMIN_TOKEN`.
 
 ## Login Persistence
 
@@ -251,8 +197,3 @@ The `local-llm` Kubernetes namespace uses a static `local-llm-shared-auth-nfs`
 PV/PVC binding for `shared-auth-nfs`. It intentionally points at the existing
 shared-auth NFS path used by the default deployment so both LAN paths read the
 same users and server-side sessions.
-
-Integration secrets use `SECRET_STORE_KEY` or `SECRET_STORE_KEY_FILE`
-(`LOCAL_LLM_DATA_DIR/secret_store_key` by default). Older persisted
-`jwt_secret` files are copied as a compatibility key for existing encrypted
-GitHub settings, but JWTs are no longer login/session authority.

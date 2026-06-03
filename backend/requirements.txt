@@ -4,5 +4,3 @@ httpx
 sqlalchemy
 aiosqlite
 bcrypt
-cryptography
-PyJWT

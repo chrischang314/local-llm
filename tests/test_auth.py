@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 
 import bcrypt
 from fastapi.testclient import TestClient
@@ -14,13 +15,10 @@ from starlette.responses import Response
 _TEST_PATH = pathlib.Path(tempfile.mkdtemp(prefix="local-llm-auth-test-"))
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(_TEST_PATH / 'chat.db').as_posix()}"
 os.environ["SHARED_AUTH_DB"] = str(_TEST_PATH / "auth.db")
-os.environ.setdefault("SECRET_STORE_KEY", "test-suite-secret")
-
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "backend"))
 
 import auth  # noqa: E402
 import main  # noqa: E402
-import secret_store  # noqa: E402
 from models import User  # noqa: E402
 
 
@@ -157,26 +155,45 @@ class AuthEndpointTests(unittest.TestCase):
             self.assertEqual(logged_in_again.status_code, 200, logged_in_again.text)
             self.assertEqual(logged_in_again.json()["username"], username)
 
-    def test_empty_secret_store_key_file_is_repaired(self):
-        key_file = _TEST_PATH / f"empty-secret-{uuid.uuid4().hex}"
-        key_file.write_text("", encoding="utf-8")
-        original_key = os.environ.pop("SECRET_STORE_KEY", None)
-        original_file = os.environ.get("SECRET_STORE_KEY_FILE")
-        os.environ["SECRET_STORE_KEY_FILE"] = str(key_file)
-        try:
-            loaded = secret_store._load_secret_store_key()
-            self.assertTrue(loaded)
-            self.assertEqual(key_file.read_text(encoding="utf-8").strip(), loaded)
-            self.assertEqual(secret_store._load_secret_store_key(), loaded)
-        finally:
-            if original_key is not None:
-                os.environ["SECRET_STORE_KEY"] = original_key
-            else:
-                os.environ.pop("SECRET_STORE_KEY", None)
-            if original_file is not None:
-                os.environ["SECRET_STORE_KEY_FILE"] = original_file
-            else:
-                os.environ.pop("SECRET_STORE_KEY_FILE", None)
+    def test_non_admin_user_cannot_mutate_models_or_workers(self):
+        username = unique_username("non-admin")
+
+        with patch.dict(
+            os.environ,
+            {"LOCAL_LLM_ADMIN_USERS": "", "LOCAL_LLM_ADMIN_TOKEN": ""},
+            clear=False,
+        ):
+            with TestClient(main.app) as client:
+                client.post(
+                    "/auth/register",
+                    json={"username": username, "password": "correct-horse"},
+                )
+
+                pull_response = client.post(
+                    "/models/pull",
+                    json={"name": "llama3.2:3b"},
+                )
+                delete_response = client.delete("/models/llama3.2:3b")
+                worker_response = client.patch(
+                    "/workers/gpu-worker",
+                    json={"enabled": False},
+                )
+
+        self.assertEqual(pull_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(worker_response.status_code, 403)
+
+    def test_v1_chat_completions_requires_authentication(self):
+        with TestClient(main.app) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "llama3.2:3b",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

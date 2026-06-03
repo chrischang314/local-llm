@@ -33,15 +33,12 @@ async def get_db():
 # SQL fragment, e.g. "TEXT DEFAULT ''".
 _NEW_COLUMNS: list[tuple[str, str, str]] = [
     ("users", "password_hash", "TEXT"),
+    ("users", "shared_auth_user_id", "INTEGER"),
     ("conversations", "system_prompt", "TEXT DEFAULT ''"),
     ("conversations", "model", "TEXT"),
     ("conversations", "temperature", "REAL DEFAULT 0.7"),
     ("conversations", "top_p", "REAL DEFAULT 0.9"),
     ("conversations", "top_k", "INTEGER DEFAULT 40"),
-    ("github_installations", "auth_type", "TEXT DEFAULT 'app' NOT NULL"),
-    ("github_installations", "access_token_encrypted", "TEXT"),
-    ("github_installations", "token_scope", "TEXT"),
-    ("github_installations", "token_type", "TEXT"),
     ("messages", "model", "TEXT"),
     ("messages", "backend_name", "TEXT"),
     ("messages", "model_status", "TEXT"),
@@ -59,3 +56,12 @@ async def migrate_schema():
                 await conn.execute(
                     text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
                 )
+        await conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_users_shared_auth_user_id
+                ON users(shared_auth_user_id)
+                WHERE shared_auth_user_id IS NOT NULL
+                """
+            )
+        )

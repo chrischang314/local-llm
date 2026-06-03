@@ -2,7 +2,7 @@
 
 The browser stores only an HttpOnly session cookie. Users and sessions live in
 the shared SQLite database pointed at by ``SHARED_AUTH_DB``; the app-local
-``users`` table is still used for conversation and GitHub job ownership.
+``users`` table is still used for conversation ownership.
 """
 
 from __future__ import annotations
@@ -334,21 +334,50 @@ async def ensure_local_user(shared_user: dict[str, Any], db: AsyncSession) -> Us
     shared_id = int(shared_user["id"])
     username = str(shared_user["username"])
     local = (
-        await db.execute(select(User).where(User.username == username))
+        await db.execute(select(User).where(User.shared_auth_user_id == shared_id))
     ).scalar_one_or_none()
 
     if local is None:
-        existing_id = await db.get(User, shared_id)
         local = (
-            User(username=username, password_hash=None)
-            if existing_id is not None
-            else User(id=shared_id, username=username, password_hash=None)
-        )
-        db.add(local)
+            await db.execute(select(User).where(User.username == username))
+        ).scalar_one_or_none()
+        if local is not None and local.shared_auth_user_id is None:
+            local.shared_auth_user_id = shared_id
+        else:
+            local = User(
+                username=await _available_local_username(username, shared_id, db),
+                shared_auth_user_id=shared_id,
+                password_hash=None,
+            )
+            db.add(local)
+    elif local.username != username:
+        local.username = await _available_local_username(username, shared_id, db)
 
     await db.commit()
     await db.refresh(local)
     return local
+
+
+async def _available_local_username(
+    username: str,
+    shared_id: int,
+    db: AsyncSession,
+) -> str:
+    owner = (
+        await db.execute(select(User).where(User.username == username))
+    ).scalar_one_or_none()
+    if owner is None or owner.shared_auth_user_id == shared_id:
+        return username
+
+    base = f"{username} ({shared_id})"
+    candidate = base
+    suffix = 2
+    while (
+        await db.execute(select(User).where(User.username == candidate))
+    ).scalar_one_or_none() is not None:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
 
 
 async def current_user(
@@ -364,3 +393,30 @@ async def current_user(
 
 async def current_user_id(user: dict[str, Any] = Depends(current_user)) -> int:
     return int(user["local_id"])
+
+
+def _admin_users() -> set[str]:
+    configured = os.getenv("LOCAL_LLM_ADMIN_USERS", "")
+    return {
+        username.strip().casefold()
+        for username in configured.split(",")
+        if username.strip()
+    }
+
+
+async def operator_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Require an operator identity for model and worker mutations."""
+    admin_token = os.getenv("LOCAL_LLM_ADMIN_TOKEN", "").strip()
+    authorization = request.headers.get("authorization", "")
+    if admin_token and authorization.lower().startswith("bearer "):
+        bearer_token = authorization.split(" ", 1)[1].strip()
+        if hmac.compare_digest(bearer_token, admin_token):
+            return {"id": None, "username": "admin-token", "operator": True}
+
+    user = await current_user(request, db)
+    if user["username"].casefold() in _admin_users():
+        return user
+    raise HTTPException(status_code=403, detail="Operator privileges required")

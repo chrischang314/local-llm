@@ -9,10 +9,8 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $manifest = Join-Path $repoRoot "k8s\local-llm\live-default-app-overrides.yaml"
-$sandboxManifest = Join-Path $repoRoot "k8s\local-llm\agent-sandbox.yaml"
 
 kubectl apply -f $manifest
-kubectl apply -f $sandboxManifest
 
 kubectl -n $AppNamespace set env "deployment/$BackendDeployment" `
     "KUBERNETES_NAMESPACE=$ControlNamespace" `

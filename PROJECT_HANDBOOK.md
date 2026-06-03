@@ -79,11 +79,10 @@ The `local-llm` namespace deployment binds `shared-auth-nfs` through a static
 PV to the same NFS auth DB used by the default deployment. A separate dynamic
 claim would create a different SSO database and break cross-app sessions.
 
-Local LLM still keeps app-local user rows for conversation and GitHub job
-ownership. On each authenticated request, the shared cookie identifies the
-shared user, and the backend ensures a matching local ownership row. Existing
-legacy local users can seed the shared auth DB on first successful login with
-their old password.
+Local LLM still keeps app-local user rows for conversation ownership. On each
+authenticated request, the shared cookie identifies the shared user, and the
+backend ensures a matching local ownership row. Existing legacy local users can
+seed the shared auth DB on first successful login with their old password.
 
 ## Conversation Portability
 
@@ -127,69 +126,19 @@ When changing a browser library version, update the pinned npm dependency,
 refresh `frontend/vendor/`, and run the static frontend test that checks both
 HTML pages for CDN references and missing vendored assets.
 
-## Agentic Code Mode
+## Chat-Only Boundary
 
-The main workspace has separate Chat and Code modes. Chat remains a
-conversational UI over routed Ollama workers; Code mode is an authenticated
-operational workflow that prompts a repository change, connects to GitHub
-through a site-configured GitHub OAuth redirect, and executes inside a dedicated
-Kubernetes sandbox namespace.
+Local LLM is intentionally a routed Ollama chat app. It owns conversation
+history, model settings, model route labels, conversation export, optional
+web-research augmentation, and worker routing for chat inference.
 
-The backend stores GitHub installation records, queued jobs, ordered steps, logs,
-and diff artifacts in SQLite. The frontend talks to `/github/*` for installation
-status, repository listing, and branch lookup, then `/agent/*` for create/list,
-detail, SSE events, cancellation, and diff retrieval.
+Coding automation, repository mutation, browser or desktop execution, external
+app sign-in, delegated workflows, and command runners are out of scope here and
+belong in Local Agent.
 
-The intended authorization path is service-configured GitHub OAuth. A Local LLM
-operator enters the OAuth App Client ID and Client Secret once in the collapsed
-Settings integration setup panel; the backend stores them encrypted in SQLite.
-After that, each Local LLM user clicks the Sign in with GitHub button,
-authorizes on github.com, and returns through the callback with their own
-encrypted GitHub token. The legacy GitHub App installation path is still present
-for deployments that prefer installation tokens. A temporary `GITHUB_BYPASS_TOKEN`
-escape hatch exists only for controlled LAN smoke tests against disposable
-repositories and should not replace the OAuth flow for normal use.
-
-The execution path is:
-
-1. User chooses repository, branch, model, task, and optional test command.
-2. Backend obtains a repository access token from the connected OAuth account
-   or legacy GitHub App installation and creates a Kubernetes Job in
-   `local-llm-sandbox`.
-3. Runner clones the repository and creates an `agent/<job-id>` branch.
-4. An implementation subagent uses the local OpenAI-compatible API for a bounded
-   read/search/write/run-shell/inspect-diff tool loop inside the isolated
-   repository workspace.
-5. A reviewer subagent inspects the diff for correctness, maintainability,
-   focused scope, safety, and testability.
-6. A testing agent runs the configured test command. If review finds no diff,
-   the runner first executes the configured test command once and passes that
-   failure output to the revision subagent. Reviewer or test failures are sent
-   to a revision subagent, and the review/test cycle repeats up to three times
-   before the job fails.
-7. After the reviewer and testing gates are satisfied, the runner commits the
-   final changes, requests a fresh push token, rebases, and pushes only after
-   tests pass.
-8. Branch protection, divergence, or a missing test command prevents direct base
-   branch updates. In those cases the runner pushes the agent branch and opens a
-   PR, and the job ends as `needs_review`.
-
-The sandbox namespace has restricted Pod Security labels, quota/limit defaults,
-default-deny networking, no service-account token in execution pods, no hostPath
-mounts, no Docker socket, a read-only container root filesystem, dropped Linux
-capabilities, seccomp `RuntimeDefault`, and bounded CPU, memory, and ephemeral
-storage. Runtime secrets are copied by a restricted init container into an
-in-memory `emptyDir`; the runner container receives only file paths, reads and
-unlinks the files at startup, and never starts with raw GitHub or callback tokens
-in its environment. The runner callback token is per job, and Kubernetes Secrets
-are patched with Job owner references after launch so normal TTL cleanup can
-garbage-collect them. Keep `AGENT_JOBS_ENABLED=false` until NetworkPolicy
-enforcement and canary jobs are verified live.
-
-Residual risk: standard Kubernetes NetworkPolicy is IP/CIDR based, not
-GitHub-domain aware. The current policy allows public TCP 443 while blocking
-private/LAN ranges so GitHub operations can work. Add a controlled egress proxy
-before enabling jobs on an untrusted network or for sensitive private code.
+Model pull/delete and worker on/off controls are operator-gated chat
+infrastructure controls. They should not grow into repository, browser,
+desktop, or delegated automation workflows.
 
 ## Operational Safety
 

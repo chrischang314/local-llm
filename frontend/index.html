@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Local LLM</title>
-  <link rel="stylesheet" href="style.css?v=20260602-sidebar-health-wrap" />
+  <link rel="stylesheet" href="style.css?v=20260603-chat-only" />
   <script src="vendor/marked/4.3.0/marked.min.js"></script>
   <script src="vendor/dompurify/3.4.7/purify.min.js"></script>
   <link rel="stylesheet" href="vendor/highlight.js/11.10.0/styles/github-dark.min.css" />
@@ -94,16 +94,6 @@
         </div>
 
         <div class="header-controls">
-          <div class="workspace-mode-switch" aria-label="Workspace mode">
-            <button class="mode-btn active" type="button" data-workspace-mode="chat">
-              <i data-lucide="message-square" aria-hidden="true"></i>
-              <span>Chat</span>
-            </button>
-            <button class="mode-btn" type="button" data-workspace-mode="code">
-              <i data-lucide="square-terminal" aria-hidden="true"></i>
-              <span>Code</span>
-            </button>
-          </div>
           <span id="token-counter" class="token-counter hidden" title="Estimated context size"></span>
           <button id="export-conversation-btn" class="inline-action" type="button" title="Export active conversation" disabled>
             <i data-lucide="download" aria-hidden="true"></i>
@@ -137,117 +127,6 @@
           </button>
         </div>
       </footer>
-    </section>
-
-    <section id="code-jobs-view" class="main code-jobs-view hidden" aria-label="Code jobs workspace">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Workspace</p>
-          <h1>Code change</h1>
-        </div>
-
-        <div class="header-controls">
-          <div class="workspace-mode-switch" aria-label="Workspace mode">
-            <button class="mode-btn" type="button" data-workspace-mode="chat">
-              <i data-lucide="message-square" aria-hidden="true"></i>
-              <span>Chat</span>
-            </button>
-            <button class="mode-btn active" type="button" data-workspace-mode="code">
-              <i data-lucide="square-terminal" aria-hidden="true"></i>
-              <span>Code</span>
-            </button>
-          </div>
-          <span id="agent-status-pill" class="token-counter">checking...</span>
-          <button id="refresh-code-jobs-btn" class="inline-action" type="button">
-            <i data-lucide="refresh-cw" aria-hidden="true"></i>
-            <span>Refresh</span>
-          </button>
-        </div>
-      </header>
-
-      <main class="code-jobs-layout">
-        <section class="code-panel">
-          <div class="panel-header">
-            <div>
-              <h2>Prompt a repository change</h2>
-              <p id="github-status-text" class="hint">Checking connection...</p>
-            </div>
-            <button id="github-connect-btn" class="inline-action" type="button">
-              <i data-lucide="github" aria-hidden="true"></i>
-              <span>Sign in with GitHub</span>
-            </button>
-          </div>
-
-          <form id="code-job-form" class="code-job-form">
-            <label>Repository search
-              <div class="repo-search-row">
-                <input id="repo-search-input" type="search" placeholder="owner/repo" autocomplete="off" />
-                <button id="repo-search-btn" class="inline-action" type="button">
-                  <i data-lucide="search" aria-hidden="true"></i>
-                  <span>Search</span>
-                </button>
-              </div>
-            </label>
-
-            <div class="job-field-grid">
-              <label>Repository
-                <select id="repo-select">
-                  <option value="">Connect GitHub first</option>
-                </select>
-              </label>
-              <label>Branch
-                <select id="branch-select">
-                  <option value="">Select a repo</option>
-                </select>
-              </label>
-              <label>Model
-                <select id="agent-model-select">
-                  <option value="">Loading models...</option>
-                </select>
-              </label>
-            </div>
-
-            <label>Task
-              <textarea id="agent-task-input" rows="6" placeholder="Tell the agent what code change to make, what tests to run, and what finished should look like."></textarea>
-            </label>
-
-            <label>Test command
-              <input id="agent-test-command-input" type="text" placeholder="e.g. python -m unittest discover -s tests" />
-            </label>
-
-            <div class="form-actions">
-              <button id="run-code-job-btn" class="login-submit" type="submit">
-                <i data-lucide="play" aria-hidden="true"></i>
-                <span>Run code change</span>
-              </button>
-              <span id="code-job-form-status" class="hint"></span>
-            </div>
-          </form>
-        </section>
-
-        <section class="code-panel job-list-panel">
-          <div class="panel-header">
-            <h2>Jobs</h2>
-          </div>
-          <div id="agent-job-list" class="agent-job-list">No jobs yet.</div>
-        </section>
-
-        <section class="code-panel job-detail-panel">
-          <div class="panel-header">
-            <div>
-              <h2 id="agent-job-title">Job details</h2>
-              <p id="agent-job-summary" class="hint">Select a job to inspect logs and changes.</p>
-            </div>
-            <button id="cancel-code-job-btn" class="inline-action danger-action hidden" type="button">
-              <i data-lucide="ban" aria-hidden="true"></i>
-              <span>Cancel</span>
-            </button>
-          </div>
-          <div id="agent-job-timeline" class="job-timeline"></div>
-          <pre id="agent-job-logs" class="job-log">Waiting for a job...</pre>
-          <pre id="agent-job-diff" class="job-diff">No diff loaded.</pre>
-        </section>
-      </main>
     </section>
   </div>
 
@@ -307,35 +186,6 @@
           <div id="worker-readiness-panel" class="worker-readiness-panel">Checking worker readiness...</div>
           <div id="worker-list" class="worker-list">Loading...</div>
         </section>
-
-        <section>
-          <h3>Integrations</h3>
-          <p id="settings-github-status" class="hint">GitHub status unknown.</p>
-          <button id="settings-github-connect" class="inline-action" type="button">
-            <i data-lucide="github" aria-hidden="true"></i>
-            <span>Sign in with GitHub</span>
-          </button>
-          <details id="github-oauth-setup" class="github-oauth-setup settings-oauth-setup">
-            <summary>GitHub service setup</summary>
-            <p class="hint">Admin-only setup for the shared OAuth app. Each Local LLM user still receives and keeps their own GitHub authorization after sign-in.</p>
-            <label>Callback URL
-              <input id="github-oauth-callback-url" type="text" readonly value="Loading callback URL..." />
-            </label>
-            <div class="row oauth-field-grid">
-              <label>OAuth Client ID
-                <input id="github-oauth-client-id" type="text" autocomplete="off" placeholder="GitHub OAuth Client ID" />
-              </label>
-              <label>OAuth Client Secret
-                <input id="github-oauth-client-secret" type="password" autocomplete="off" placeholder="GitHub OAuth Client Secret" />
-              </label>
-            </div>
-            <button id="github-oauth-save-btn" class="inline-action" type="button">
-              <i data-lucide="save" aria-hidden="true"></i>
-              <span>Save service setup</span>
-            </button>
-            <p id="github-oauth-config-status" class="hint">Normal users should use only Sign in with GitHub.</p>
-          </details>
-        </section>
       </div>
     </div>
   </div>
@@ -346,6 +196,6 @@
     }
   </script>
   <script src="health-status.js?v=20260528-worker-readiness"></script>
-  <script src="app.js?v=20260601-mobile-rendering"></script>
+  <script src="app.js?v=20260603-chat-only"></script>
 </body>
 </html>

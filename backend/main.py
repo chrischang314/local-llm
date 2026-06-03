@@ -18,8 +18,8 @@ Authenticated (projects_lan_session cookie):
   DELETE /conversations/{id}/messages/from/{message_id}
                                 — delete the given message and all later ones
   GET    /models                — list installed Ollama models
-  POST   /models/pull           — pull a model (streams progress lines)
-  DELETE /models/{name}         — delete an installed model
+  POST   /models/pull           — operator-only model pull
+  DELETE /models/{name}         — operator-only model delete
   POST   /chat                  — stream a chat completion + persist messages
 
 The /chat endpoint accepts a `regenerate` flag: when True, the last
@@ -59,6 +59,7 @@ from auth import (
     ensure_local_user,
     init_shared_auth,
     migrate_legacy_user,
+    operator_user,
     public_user,
     register_user,
     revoke_session,
@@ -66,8 +67,6 @@ from auth import (
     verify_legacy_password,
 )
 from database import AsyncSessionLocal, Base, engine, get_db, migrate_schema
-from agent_routes import router as agent_router
-from github_routes import router as github_router
 from models import Conversation
 from models import Message as DBMessage
 from models import User
@@ -124,10 +123,6 @@ app.add_middleware(
         "X-Research-Source-Count",
     ],
 )
-
-app.include_router(github_router)
-app.include_router(agent_router)
-
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -1046,7 +1041,7 @@ async def list_workers(_: dict = Depends(current_user)):
 async def set_worker_state(
     worker_name: str,
     body: WorkerToggleRequest,
-    _: dict = Depends(current_user),
+    _: dict = Depends(operator_user),
 ):
     try:
         switch = await _worker_switch_by_name(worker_name)
@@ -1085,7 +1080,7 @@ async def set_worker_state(
 
 
 @app.post("/models/pull")
-async def pull_model(body: ModelPullRequest, _: dict = Depends(current_user)):
+async def pull_model(body: ModelPullRequest, _: dict = Depends(operator_user)):
     """Pull a model, streaming Ollama's progress lines back to the client.
 
     Each line of the response body is a JSON object from Ollama's pull API
@@ -1116,7 +1111,7 @@ async def pull_model(body: ModelPullRequest, _: dict = Depends(current_user)):
 
 
 @app.delete("/models/{name:path}")
-async def delete_model(name: str, _: dict = Depends(current_user)):
+async def delete_model(name: str, _: dict = Depends(operator_user)):
     """Delete an installed Ollama model."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -1362,7 +1357,7 @@ class ApiChatRequest(BaseModel):
 
 
 @app.get("/v1/models")
-async def v1_list_models():
+async def v1_list_models(_: dict = Depends(current_user)):
     ollama_models = (await ollama_router.list_models())["models"]
     if not ollama_models:
         raise HTTPException(status_code=503, detail="No available Ollama backends or models")
@@ -1382,7 +1377,10 @@ async def v1_list_models():
 
 
 @app.post("/v1/chat/completions")
-async def v1_chat_completions(request: ApiChatRequest):
+async def v1_chat_completions(
+    request: ApiChatRequest,
+    _: dict = Depends(current_user),
+):
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
     api_messages = [m.model_dump() for m in request.messages]

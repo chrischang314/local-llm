@@ -75,7 +75,7 @@ class ConversationExportRouteTests(unittest.IsolatedAsyncioTestCase):
             conv = Conversation(
                 user=owner,
                 title="Saved Answer",
-                model="qwen2.5-coder:7b",
+                model="llama3.2:3b",
                 messages=[
                     Message(role="user", content="How do I deploy?"),
                     Message(role="assistant", content="Run the checked deploy path."),

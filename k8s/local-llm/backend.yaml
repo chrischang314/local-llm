@@ -103,8 +103,6 @@ spec:
           env:
             - name: OLLAMA_BACKENDS_FILE
               value: /app/config/backends.json
-            - name: AGENT_RUNNER_URL
-              value: http://local-llm-agent-runner.local-llm.svc.cluster.local:8080
             - name: WEB_RESEARCH_ENABLED
               value: "true"
             - name: WEB_RESEARCH_PROVIDER
@@ -115,12 +113,6 @@ spec:
               value: /shared-auth/auth.db
             - name: CORS_ORIGINS
               value: http://localllm.lan,http://projects.lan
-            - name: AGENT_RUNNER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: local-llm-agent-runner-auth
-                  key: token
-                  optional: true
           volumeMounts:
             - name: ollama-backends
               mountPath: /app/config
