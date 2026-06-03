@@ -3,6 +3,17 @@
 Local LLM provides the homelab Ollama frontend/backend and Kubernetes routing
 configuration for local model workers.
 
+## Frontend Assets And API Docs
+
+The frontend serves Marked, DOMPurify, Highlight.js, and Lucide from
+`frontend/vendor/` instead of loading public CDNs at runtime. This keeps the LAN
+UI usable when internet access or CDN availability is unreliable and avoids
+unpinned `latest` browser assets.
+
+The API docs use `http://localllm.lan/v1` as the primary OpenAI-compatible LAN
+base URL. `http://localhost:8001/v1` remains the Docker Compose and local
+development alternate.
+
 ## Kubernetes Workers
 
 Personal Windows PCs are integrated as optional external Ollama workers rather

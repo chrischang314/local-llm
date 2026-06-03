@@ -11,6 +11,18 @@ Personal Windows PCs are optional capacity: they can add GPU throughput when
 available, but the system must keep working when they are off, gaming, or
 rebooting.
 
+## Frontend Packaging
+
+The LAN frontend is intentionally static and self-contained. Runtime libraries
+for Markdown rendering, HTML sanitization, syntax highlighting, and icons are
+vendored under `frontend/vendor/` and loaded from same-origin paths. This keeps
+the chat UI, API docs, Markdown rendering, code highlighting, and Lucide icons
+available without public CDN access.
+
+When changing those libraries, update the pinned filename, the HTML reference,
+and the frontend static test together. Do not reintroduce unpinned CDN URLs or
+`@latest` assets in runtime HTML.
+
 ## Optional Windows Workers
 
 Windows PCs are not joined as native K3s nodes in this setup. Instead, each PC
